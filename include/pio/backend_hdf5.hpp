@@ -4,8 +4,15 @@
 //   /fields/data    3-D double  (collective hyperslab, ghost-aware memspace)
 //   /particles/{x,y,z,px,py,pz,mass}  1-D double, merged per rank
 //   /particles/id   1-D uint64
-// Particle datasets are written directly out of the AoS buffer using a
-// strided memory dataspace (stride = 8 doubles) -- no SoA temporaries.
+//
+// Particle writes have two strategies producing BYTE-IDENTICAL files:
+//   * prepack (default): gather each AoS member into a contiguous staging
+//     vector, then a plain contiguous H5Dwrite -- HDF5's fast path. Mirrors
+//     what the adios2 backend does, so the backends compete on I/O, not on
+//     who thought to pack first ("fair").
+//   * strided (--h5-strided): hand HDF5 the AoS stride pattern (stride = 8
+//     doubles) and let its generic selection machinery walk it element by
+//     element. Kept to MEASURE the conversion cost, not to use.
 //
 // NOTE (bug fixed vs old ci_pic_chkpt::p_write_hdf5): the old code passed
 // a simple local-dims memspace together with an &arr[g][g][g] pointer,
@@ -143,7 +150,7 @@ public:
         }
         split.field_seconds = w.elapsed();
 
-        // ---- /particles/* : strided reads straight out of the AoS ----------
+        // ---- /particles/* : columnar member datasets -------------------------
         w.restart();
         const hsize_t pgcount = hsize_t(parts.global_count());
         const hsize_t pstart = hsize_t(parts.rank_offset());
@@ -155,8 +162,40 @@ public:
         // (the full record span) and stride through it picking members.
         const hsize_t pmem_extent = pcount * stride;
 
-        auto write_member = [&](const char* dset_name, std::size_t member_offset,
-                                hid_t h5type) {
+        // member table: dataset name <-> memory location, double members 0..6
+        struct Member {
+            const char* name;
+            std::size_t aos_off;                // offsetof into Particle
+            double Particle::* dmem;            // typed access (prepack gather)
+        };
+        static constexpr Member members[7] = {
+            {"particles/x", offsetof(Particle, x), &Particle::x},
+            {"particles/y", offsetof(Particle, y), &Particle::y},
+            {"particles/z", offsetof(Particle, z), &Particle::z},
+            {"particles/px", offsetof(Particle, px), &Particle::px},
+            {"particles/py", offsetof(Particle, py), &Particle::py},
+            {"particles/pz", offsetof(Particle, pz), &Particle::pz},
+            {"particles/mass", offsetof(Particle, mass), &Particle::mass}};
+
+        // staging for prepack (inside the particle timing region on purpose:
+        // the packing IS the cost the strided path hides inside HDF5)
+        std::array<std::vector<double>, 7> stage_d;
+        std::vector<std::uint64_t> stage_i;
+        if (settings_.h5_prepack) {
+            const std::size_t n = parts.local_count();
+            for (auto& v : stage_d)
+                v.resize(n);
+            stage_i.resize(n);
+            const Particle* p = parts.data();
+            for (std::size_t i = 0; i < n; ++i) {
+                for (int m = 0; m < 7; ++m)
+                    stage_d[m][i] = p[i].*members[m].dmem;
+                stage_i[i] = p[i].id;
+            }
+        }
+
+        auto write_member = [&](const char* dset_name, hid_t h5type,
+                                const void* mem_ptr, bool contiguous_mem) {
             detail::H5SpaceObj filespace{H5Screate_simple(1, &pgcount, nullptr)};
             detail::H5DsetObj dset{H5Dcreate(*file, dset_name, h5type, *filespace,
                                              *lcpl, H5P_DEFAULT, H5P_DEFAULT)};
@@ -164,27 +203,34 @@ public:
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, &pstart,
                                                  nullptr, &pcount, nullptr),
                              "particle filespace hyperslab");
-            // memory: stride over the AoS records (see pmem_extent comment)
-            detail::H5SpaceObj memspace{H5Screate_simple(1, &pmem_extent, nullptr)};
-            const hsize_t mstart0 = 0;
-            detail::h5_check(H5Sselect_hyperslab(*memspace, H5S_SELECT_SET, &mstart0,
-                                                 &stride, &pcount, &one),
-                             "particle memspace stride");
-            const void* base = static_cast<const char*>(
-                static_cast<const void*>(parts.data())) + member_offset;
-            detail::h5_check(H5Dwrite(*dset, h5type, *memspace, *fsub, *xfer, base),
+            detail::H5SpaceObj memspace{
+                H5Screate_simple(1, contiguous_mem ? &pcount : &pmem_extent,
+                                 nullptr)};
+            if (!contiguous_mem) {
+                // memory: stride over the AoS records (see pmem_extent comment)
+                const hsize_t mstart0 = 0;
+                detail::h5_check(H5Sselect_hyperslab(*memspace, H5S_SELECT_SET,
+                                                     &mstart0, &stride, &pcount,
+                                                     &one),
+                                 "particle memspace stride");
+            }
+            detail::h5_check(H5Dwrite(*dset, h5type, *memspace, *fsub, *xfer,
+                                      mem_ptr),
                              "H5Dwrite particles");
         };
 
-        for (auto [nm, off] : {std::pair{"particles/x", offsetof(Particle, x)},
-                               {"particles/y", offsetof(Particle, y)},
-                               {"particles/z", offsetof(Particle, z)},
-                               {"particles/px", offsetof(Particle, px)},
-                               {"particles/py", offsetof(Particle, py)},
-                               {"particles/pz", offsetof(Particle, pz)},
-                               {"particles/mass", offsetof(Particle, mass)}})
-            write_member(nm, off, H5T_NATIVE_DOUBLE);
-        write_member("particles/id", offsetof(Particle, id), H5T_NATIVE_UINT64);
+        const char* aos_base = reinterpret_cast<const char*>(parts.data());
+        for (const auto& m : members)
+            write_member(m.name, H5T_NATIVE_DOUBLE,
+                         settings_.h5_prepack
+                             ? static_cast<const void*>(stage_d[&m - members].data())
+                             : aos_base + m.aos_off,
+                         settings_.h5_prepack);
+        write_member("particles/id", H5T_NATIVE_UINT64,
+                     settings_.h5_prepack
+                         ? static_cast<const void*>(stage_i.data())
+                         : aos_base + offsetof(Particle, id),
+                     settings_.h5_prepack);
 
         split.particle_seconds = w.elapsed();
         file.close(); // collective close point
@@ -224,6 +270,62 @@ public:
                          "H5Dread fields");
     }
 
+    /// Read this rank's own particle block back: contiguous file range into
+    /// contiguous temp buffers (HDF5 fast path), then assemble the AoS.
+    void read_particles(const std::filesystem::path& path, const Domain&,
+                        const ParticleSet& src, std::vector<Particle>& out) const {
+        const std::size_t n = src.local_count();
+        out.assign(n, Particle{});
+        if (n == 0)
+            return;
+
+        Info info = settings_.make_romio_info();
+        detail::H5PropObj fapl{H5Pcreate(H5P_FILE_ACCESS)};
+        detail::h5_check(H5Pset_fapl_mpio(*fapl, comm_, info.get()), "H5Pset_fapl_mpio");
+        detail::H5FileObj file{H5Fopen(path.c_str(), H5F_ACC_RDONLY, *fapl)};
+        if (*file < 0)
+            throw std::runtime_error("H5Fopen failed: " + path.string());
+        detail::H5PropObj xfer{H5Pcreate(H5P_DATASET_XFER)};
+        if (settings_.collective_buffering) {
+            detail::h5_check(H5Pset_dxpl_mpio(*xfer, H5FD_MPIO_COLLECTIVE), "dxpl_mpio");
+            detail::h5_check(H5Pset_dxpl_mpio_collective_opt(*xfer,
+                                                             H5FD_MPIO_COLLECTIVE_IO),
+                             "dxpl_mpio_collective_opt");
+        }
+
+        const hsize_t pstart = hsize_t(src.rank_offset());
+        const hsize_t pcount = hsize_t(n);
+        auto read_member = [&](const char* name, hid_t type, void* buf) {
+            detail::H5DsetObj dset{H5Dopen(*file, name, H5P_DEFAULT)};
+            if (*dset < 0)
+                throw std::runtime_error(std::string("H5Dopen failed: ") + name);
+            detail::H5SpaceObj fsub{H5Dget_space(*dset)};
+            detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, &pstart,
+                                                 nullptr, &pcount, nullptr),
+                             "particle read filespace");
+            detail::H5SpaceObj memspace{H5Screate_simple(1, &pcount, nullptr)};
+            detail::h5_check(H5Dread(*dset, type, *memspace, *fsub, *xfer, buf),
+                             "H5Dread particles");
+        };
+
+        std::vector<double> cd(n);
+        double Particle::*dmem[7] = {&Particle::x, &Particle::y, &Particle::z,
+                                     &Particle::px, &Particle::py,
+                                     &Particle::pz, &Particle::mass};
+        const char* names[7] = {"particles/x", "particles/y", "particles/z",
+                                "particles/px", "particles/py", "particles/pz",
+                                "particles/mass"};
+        for (int m = 0; m < 7; ++m) {
+            read_member(names[m], H5T_NATIVE_DOUBLE, cd.data());
+            for (std::size_t i = 0; i < n; ++i)
+                out[i].*dmem[m] = cd[i];
+        }
+        std::vector<std::uint64_t> ci(n);
+        read_member("particles/id", H5T_NATIVE_UINT64, ci.data());
+        for (std::size_t i = 0; i < n; ++i)
+            out[i].id = ci[i];
+    }
+
 private:
     MPI_Comm comm_;
     IoSettings settings_;
@@ -243,6 +345,10 @@ public:
         throw std::logic_error("pio_bench built without HDF5 support");
     }
     void read_field(const std::filesystem::path&, const Domain&, Field3d<double>&) const {
+        throw std::logic_error("pio_bench built without HDF5 support");
+    }
+    void read_particles(const std::filesystem::path&, const Domain&,
+                        const ParticleSet&, std::vector<Particle>&) const {
         throw std::logic_error("pio_bench built without HDF5 support");
     }
 };

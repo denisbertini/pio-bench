@@ -82,6 +82,27 @@ public:
         fh.close();
     }
 
+    /// Read this rank's own record block back from after the field bytes
+    /// (default byte view + absolute collective read -- no subarray needed).
+    void read_particles(const std::filesystem::path& path, const Domain& d,
+                        const ParticleSet& src, std::vector<Particle>& out) const {
+        const std::size_t n = src.local_count();
+        out.assign(n, Particle{});
+        if (static_cast<MPI_Aint>(n) > std::numeric_limits<int>::max())
+            throw MpiError("particle block exceeds int count limit");
+
+        const MPI_Offset disp =
+            static_cast<MPI_Offset>(d.global[0]) * d.global[1] * d.global[2] *
+                sizeof(double) +
+            static_cast<MPI_Offset>(src.rank_offset()) * sizeof(Particle);
+
+        File fh = File::open(comm_, path.string(), MPI_MODE_RDONLY, MPI_INFO_NULL);
+        PIO_MPI(MPI_File_read_at_all(fh.get(), disp, out.data(),
+                                     static_cast<int>(n),
+                                     ParticleSet::record_type(), MPI_STATUS_IGNORE));
+        fh.close();
+    }
+
 private:
     MPI_Comm comm_;
     IoSettings settings_;

@@ -116,6 +116,8 @@ struct BenchConfig {
     std::optional<int> aggregators{};         // cb_nodes / NumAggregators
     std::optional<std::size_t> buffer_bytes{}; // cb_buffer_size / BufferVSize
     bool collective_buffering{true};           // ROMIO hint (mpiio/hdf5)
+    bool h5_prepack{true};                     // hdf5: contiguous staging writes
+                                               // (false = in-library strided)
 
     // ---- time loop ------------------------------------------------------------
     int steps{10};
@@ -142,11 +144,13 @@ struct BenchConfig {
         "  --buffer SIZE          cb_buffer_size / BufferVSize,   (library default)\n"
         "                         suffixes: K M G or KiB MiB GiB\n"
         "  --no-cb                disable ROMIO collective buffering\n"
+        "  --h5-strided           hdf5: in-library strided particle writes\n"
+        "                         (default: pre-packed contiguous writes)\n"
         "  --steps N              timesteps                       (10)\n"
         "  --interval N           checkpoint every N steps        (1)\n"
         "  --max-checkpoints N    cap checkpoints, -1 unlimited   (-1)\n"
         "  --compute-ms MS        sleep per step (fake compute)   (0)\n"
-        "  --verify               read back and sample-compare    (off)\n"
+        "  --verify               read back: fields sampled, particles full (off)\n"
         "  --sample-rate N        verify stride per axis          (16)\n"
         "  --keep-files           keep checkpoint files           (remove)\n"
         "  --quiet                suppress per-step output\n"
@@ -213,6 +217,8 @@ struct BenchConfig {
                 cfg.buffer_bytes = static_cast<std::size_t>(detail::parse_size(need_value(i, key)));
             } else if (key == "no-cb") {
                 cfg.collective_buffering = false;
+            } else if (key == "h5-strided") {
+                cfg.h5_prepack = false;
             } else if (key == "steps") {
                 cfg.steps = static_cast<int>(detail::parse_ll(need_value(i, key), key));
             } else if (key == "interval") {
@@ -267,6 +273,8 @@ struct BenchConfig {
            << " cb=" << (collective_buffering ? "on" : "off")
            << " verify=" << (verify ? "on" : "off")
            << " keep_files=" << (keep_files ? "on" : "off");
+        if (backend == BackendKind::Hdf5)
+            os << " h5_write=" << (h5_prepack ? "prepack" : "strided");
         return os.str();
     }
 };

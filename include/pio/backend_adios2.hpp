@@ -160,6 +160,57 @@ public:
         engine.Close();
     }
 
+    /// Read this rank's own block back out of the merged global arrays:
+    /// LocalValueDim variables become global-shape on read, so select
+    /// [rank_offset, local_count) of each member and reassemble the AoS.
+    void read_particles(const std::filesystem::path& path, const Domain&,
+                        const ParticleSet& src, std::vector<Particle>& out) const {
+        const std::size_t n = src.local_count();
+        out.assign(n, Particle{});
+        if (n == 0)
+            return;
+
+        adios2::ADIOS adios;
+        adios2::IO io = adios.DeclareIO("pio_bench_particle_read");
+        io.SetEngine("BP5");
+        adios2::Engine engine = io.Open(path.string(), adios2::Mode::Read, comm_);
+        engine.BeginStep(); // variables exist only from here on (see read_field)
+
+        const adios2::Dims sstart{size_t(src.rank_offset())};
+        const adios2::Dims scount{n};
+        auto get_member = [&](const char* name, double Particle::*mem) {
+            auto var = io.InquireVariable<double>(name);
+            if (!var)
+                throw std::runtime_error(std::string("adios2: ") + name +
+                                         " not found in " + path.string());
+            var.SetSelection(adios2::Box<adios2::Dims>(sstart, scount));
+            std::vector<double> tmp(n);
+            engine.Get(var, tmp.data(), adios2::Mode::Sync);
+            for (std::size_t i = 0; i < n; ++i)
+                out[i].*mem = tmp[i];
+        };
+        get_member("particles/x", &Particle::x);
+        get_member("particles/y", &Particle::y);
+        get_member("particles/z", &Particle::z);
+        get_member("particles/px", &Particle::px);
+        get_member("particles/py", &Particle::py);
+        get_member("particles/pz", &Particle::pz);
+        get_member("particles/mass", &Particle::mass);
+
+        auto var_id = io.InquireVariable<std::uint64_t>("particles/id");
+        if (!var_id)
+            throw std::runtime_error("adios2: particles/id not found in " +
+                                     path.string());
+        var_id.SetSelection(adios2::Box<adios2::Dims>(sstart, scount));
+        std::vector<std::uint64_t> tmp_id(n);
+        engine.Get(var_id, tmp_id.data(), adios2::Mode::Sync);
+        for (std::size_t i = 0; i < n; ++i)
+            out[i].id = tmp_id[i];
+
+        engine.EndStep();
+        engine.Close();
+    }
+
 private:
     MPI_Comm comm_;
     IoSettings settings_;
@@ -179,6 +230,10 @@ public:
         throw std::logic_error("pio_bench built without ADIOS2 support");
     }
     void read_field(const std::filesystem::path&, const Domain&, Field3d<double>&) const {
+        throw std::logic_error("pio_bench built without ADIOS2 support");
+    }
+    void read_particles(const std::filesystem::path&, const Domain&,
+                        const ParticleSet&, std::vector<Particle>&) const {
         throw std::logic_error("pio_bench built without ADIOS2 support");
     }
 };

@@ -29,9 +29,11 @@ struct IoSettings {
     std::optional<int> aggregators;
     std::optional<std::size_t> buffer_bytes;
     bool collective_buffering{true};
+    bool h5_prepack{true};  // hdf5: gather members before H5Dwrite (cf. --h5-strided)
 
     static IoSettings from(const BenchConfig& c) {
-        return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering};
+        return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
+                          c.h5_prepack};
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.
@@ -57,13 +59,16 @@ template <typename B>
 concept IoBackend = requires(B b, MPI_Comm comm, const IoSettings& s,
                              const std::filesystem::path& path, const Domain& d,
                              const Field3d<double>& f, const ParticleSet& ps,
-                             Field3d<double>& dst) {
+                             Field3d<double>& dst, std::vector<Particle>& pdst) {
     { B::name } -> std::convertible_to<std::string_view>;
     { B::extension } -> std::convertible_to<std::string_view>;
     { B::available } -> std::convertible_to<bool>;
     B(comm, s);
     { b.write(path, d, f, ps) } -> std::same_as<WriteSplit>;
     { b.read_field(path, d, dst) } -> std::same_as<void>;
+    // read a rank's own particle block back out of the checkpoint: the
+    // verify path must cover EVERYTHING the write path wrote.
+    { b.read_particles(path, d, ps, pdst) } -> std::same_as<void>;
 };
 
 } // namespace pio

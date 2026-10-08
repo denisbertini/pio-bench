@@ -38,7 +38,7 @@ namespace pio {
 /// Instrument version: stamped into every metrics line so fitness data
 /// always self-documents the binary that produced it (bump on ANY change
 /// that can move measured numbers; tag the repo in lockstep).
-inline constexpr const char* kBenchmarkVersion = "0.1.1";
+inline constexpr const char* kBenchmarkVersion = "0.2.0";
 
 static_assert(IoBackend<MpiIoBackend>);
 static_assert(IoBackend<Hdf5Backend>);
@@ -159,7 +159,35 @@ private:
         if (rank_ == 0 && !cfg_.quiet)
             std::cout << "  verify: " << seen << " cells sampled, " << bad
                       << " mismatches\n";
-        return bad == 0;
+
+        // Particles: every rank reads back its OWN block and compares all
+        // eight members bit-exactly (raw doubles round-trip; `id` encodes
+        // the global merged index, so block/member misalignment cannot
+        // hide). The write path is only verified for what is read back --
+        // and that must be everything.
+        std::vector<Particle> reread;
+        backend_.read_particles(path, domain_, particles_, reread);
+        long long pbad = 0;
+        if (reread.size() != particles_.local_count())
+            pbad = 1; // short read counts as a failure, not a skip
+        else {
+            const Particle* src = particles_.data();
+            for (std::size_t i = 0; i < reread.size(); ++i) {
+                const Particle& a = src[i];
+                const Particle& b = reread[i];
+                if (a.x != b.x || a.y != b.y || a.z != b.z || a.px != b.px ||
+                    a.py != b.py || a.pz != b.pz || a.mass != b.mass ||
+                    a.id != b.id)
+                    ++pbad;
+            }
+        }
+        long long pbad_total = 0;
+        PIO_MPI(MPI_Allreduce(&pbad, &pbad_total, 1, MPI_LONG_LONG, MPI_SUM, comm_));
+        if (rank_ == 0 && !cfg_.quiet)
+            std::cout << "  verify: " << particles_.global_count()
+                      << " particles read back, " << pbad_total
+                      << " mismatches\n";
+        return bad == 0 && pbad_total == 0;
     }
 
     void log_banner() const {
@@ -206,6 +234,8 @@ private:
             out << ",\"aggregators\":" << *cfg_.aggregators;
         if (cfg_.buffer_bytes)
             out << ",\"buffer_bytes\":" << *cfg_.buffer_bytes;
+        if (Backend::name == "hdf5")
+            out << ",\"h5_prepack\":" << (cfg_.h5_prepack ? "true" : "false");
         out << ",\"seed\":" << cfg_.seed << "}\n";
     }
 

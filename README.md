@@ -47,8 +47,8 @@ mpirun -n 64 ./build/pio_bench \
     --verify --sample-rate 16
 ```
 
-`--help` lists all options. `--verify` reads the checkpoint back and
-sample-compares cells; a mismatch aborts the job.
+`--help` lists all options. `--verify` reads the checkpoint back — field
+cells sampled, particle blocks fully — and a mismatch aborts the job.
 
 Under Darshan:
 
@@ -69,10 +69,13 @@ Backends absent from the build report `SKIPPED`, not failure. Tunables:
 
 * Field values are the flattened global index; particle `id`s are the
   globally unique merged index — both cheap to verify independently.
-* Particle data is written directly from the in-memory array of structs:
-  MPI derived record types (MPI-IO), strided hyperslabs (HDF5),
-  `LocalValueDim` variables (ADIOS2). No intermediate copies for the
-  MPI-IO and HDF5 paths.
+* MPI-IO writes particles directly from the in-memory array of structs
+  (MPI derived record type, zero copies). HDF5 stores per-member datasets:
+  by default each member is pre-packed into a contiguous staging vector
+  so `H5Dwrite` takes its fast path; `--h5-strided` instead hands HDF5 the
+  AoS stride pattern, producing byte-identical files — the gap between
+  the two quantifies the in-library conversion cost. ADIOS2 pre-packs
+  per member into `LocalValueDim` variables.
 * With `ghost > 0` the ADIOS2 backend gathers the field interior into a
   temporary block (BP5 `Put` requires contiguous data).
 

@@ -4,9 +4,10 @@
 //   * MPI-IO : one derived record datatype (7 double + uint64), the whole
 //              per-rank block written into the SAME shared file as the
 //              fields, at a displacement after the field bytes.
-//   * HDF5   : per-member 1-D datasets, written straight out of the AoS
-//              using a strided memory dataspace (stride = record size) --
-//              no temporary transposes.
+//   * HDF5   : per-member 1-D datasets; by default each member is pre-packed
+//              into a contiguous staging vector (fast H5Dwrite path);
+//              --h5-strided instead hands HDF5 the AoS stride pattern.
+//              Both produce identical files.
 //   * ADIOS2 : per-member 1-D variables with LocalValueDim; the engine
 //              merges rank blocks into the global array automatically.
 //
