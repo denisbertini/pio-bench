@@ -103,8 +103,18 @@ public:
         const hsize_t mstart[3] = {hsize_t(d.ghost), hsize_t(d.ghost), hsize_t(d.ghost)};
 
         detail::H5PropObj xfer{H5Pcreate(H5P_DATASET_XFER)};
-        if (settings_.collective_buffering)
+        if (settings_.collective_buffering) {
             detail::h5_check(H5Pset_dxpl_mpio(*xfer, H5FD_MPIO_COLLECTIVE), "dxpl_mpio");
+            // HDF5's "collective" transfer mode by default still issues
+            // INDEPENDENT MPI-IO calls internally (coll_write=independent):
+            // the strided AoS-member selections below then get NO ROMIO
+            // aggregation -- the classic slow strided path. Request
+            // collective MPI-IO calls so ROMIO aggregates the gathers.
+            // (Only valid when the transfer mode above is COLLECTIVE.)
+            detail::h5_check(H5Pset_dxpl_mpio_collective_opt(*xfer,
+                                                             H5FD_MPIO_COLLECTIVE_IO),
+                             "dxpl_mpio_collective_opt");
+        }
 
         // "/fields/data" and "particles/*" live in groups: the default
         // LCPL does NOT create intermediate groups (H5L "component not
@@ -203,8 +213,12 @@ public:
                                              count, nullptr),
                          "read memspace hyperslab");
         detail::H5PropObj xfer{H5Pcreate(H5P_DATASET_XFER)};
-        if (settings_.collective_buffering)
+        if (settings_.collective_buffering) {
             detail::h5_check(H5Pset_dxpl_mpio(*xfer, H5FD_MPIO_COLLECTIVE), "dxpl_mpio");
+            detail::h5_check(H5Pset_dxpl_mpio_collective_opt(*xfer,
+                                                             H5FD_MPIO_COLLECTIVE_IO),
+                             "dxpl_mpio_collective_opt");
+        }
         detail::h5_check(H5Dread(*dset, H5T_NATIVE_DOUBLE, *memspace, *fsub, *xfer,
                                  dst.data()),
                          "H5Dread fields");

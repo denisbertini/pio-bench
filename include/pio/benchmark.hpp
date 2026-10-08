@@ -38,7 +38,7 @@ namespace pio {
 /// Instrument version: stamped into every metrics line so fitness data
 /// always self-documents the binary that produced it (bump on ANY change
 /// that can move measured numbers; tag the repo in lockstep).
-inline constexpr const char* kBenchmarkVersion = "0.1.0";
+inline constexpr const char* kBenchmarkVersion = "0.1.1";
 
 static_assert(IoBackend<MpiIoBackend>);
 static_assert(IoBackend<Hdf5Backend>);
@@ -81,7 +81,12 @@ public:
             PIO_MPI(MPI_Barrier(comm_)); // completion point for all ranks
             const double total_s = wall.elapsed();
 
-            const std::uint64_t bytes = field_bytes_ + particle_bytes_;
+            // AGGREGATE payload of the whole job: the write below is
+            // collective (time is shared), so the rate is global. Using
+            // rank-0's local share here under-reported by a factor of
+            // nranks (and clashed with the banner, which is global).
+            const std::uint64_t bytes =
+                (field_bytes_ + particle_bytes_) * size_of(comm_);
             const double mib = static_cast<double>(bytes) / (1024.0 * 1024.0);
 
             bool verified = true;
@@ -208,7 +213,8 @@ private:
                      const RunningStats& part) const {
         if (rank_ != 0 || total.n == 0)
             return;
-        const double mib = double(field_bytes_ + particle_bytes_) / (1024.0 * 1024.0);
+        const double mib = double(field_bytes_ + particle_bytes_) * size_of(comm_) /
+                           (1024.0 * 1024.0);  // aggregate, cf. per-run line
         std::cout << "\n"
                   << std::string(72, '=') << "\n"
                   << "pio_bench results (" << Backend::name << ", " << size_of(comm_)
