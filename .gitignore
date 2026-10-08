@@ -1,0 +1,9 @@
+build/
+deps/
+*.bin
+*.h5
+*.bp/
+*.bp
+*.jsonl
+*.csv
+CMakeUserPresets.json

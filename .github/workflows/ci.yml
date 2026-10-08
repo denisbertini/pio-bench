@@ -1,0 +1,51 @@
+name: build-and-verify
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (OpenMPI + parallel HDF5)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake make \
+            libopenmpi-dev openmpi-bin \
+            libhdf5-openmpi-dev
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER=mpicc \
+            -DCMAKE_CXX_COMPILER=mpicxx \
+            -DPIO_WITH_HDF5=ON -DPIO_WITH_ADIOS2=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run (mpiio backend, 4 ranks, verified)
+        run: |
+          mkdir -p run && cd run
+          mpiexec --allow-run-as-root -n 4 ../build/pio_bench \
+            --backend mpiio --local 32 --particles 10000 \
+            --steps 3 --interval 1 --verify
+          test -s pio_metrics.jsonl
+
+      - name: Run (hdf5 backend, 4 ranks, verified)
+        run: |
+          mkdir -p run-h5 && cd run-h5
+          mpiexec --allow-run-as-root -n 4 ../build/pio_bench \
+            --backend hdf5 --local 32 --particles 10000 \
+            --steps 3 --interval 1 --verify
+          test -s pio_metrics.jsonl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metrics
+          path: "run*/pio_metrics.jsonl"
