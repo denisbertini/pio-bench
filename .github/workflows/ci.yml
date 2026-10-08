@@ -25,6 +25,7 @@ jobs:
         # as parallel -- point at it explicitly.
         run: |
           HDF5_LIB=$(ls /usr/lib/*/libhdf5_openmpi.so | head -1)
+          test -n "$HDF5_LIB" || { echo "::error::parallel HDF5 lib not found"; exit 1; }
           HDF5_INC=$(ls -d /usr/lib/*/hdf5/openmpi/include 2>/dev/null || echo /usr/include)
           echo "HDF5 parallel lib: $HDF5_LIB"
           cmake -B build \
@@ -32,7 +33,9 @@ jobs:
             -DCMAKE_CXX_COMPILER=mpicxx \
             -DPIO_WITH_HDF5=ON -DPIO_WITH_ADIOS2=OFF \
             -DPIO_HDF5_LIBRARIES="$HDF5_LIB" \
-            -DPIO_HDF5_INCLUDE_DIRS="$HDF5_INC"
+            -DPIO_HDF5_INCLUDE_DIRS="$HDF5_INC" | tee cmake.log
+          grep -q "HDF5 backend ON" cmake.log || {
+            echo "::error::HDF5 backend was compiled out -- CI must exercise it"; exit 1; }
 
       - name: Build
         run: cmake --build build -j

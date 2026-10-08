@@ -133,6 +133,10 @@ public:
         const hsize_t pcount = hsize_t(parts.local_count());
         const hsize_t one = 1;
         const hsize_t stride = sizeof(Particle) / sizeof(double); // 8
+        // The strided selection must FIT the memory dataspace: use the
+        // standard AoS trick -- a virtual extent of pcount*stride elements
+        // (the full record span) and stride through it picking members.
+        const hsize_t pmem_extent = pcount * stride;
 
         auto write_member = [&](const char* dset_name, std::size_t member_offset,
                                 hid_t h5type) {
@@ -143,8 +147,8 @@ public:
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, &pstart,
                                                  nullptr, &pcount, nullptr),
                              "particle filespace hyperslab");
-            // memory: stride over the AoS record
-            detail::H5SpaceObj memspace{H5Screate_simple(1, &pcount, nullptr)};
+            // memory: stride over the AoS records (see pmem_extent comment)
+            detail::H5SpaceObj memspace{H5Screate_simple(1, &pmem_extent, nullptr)};
             const hsize_t mstart0 = 0;
             detail::h5_check(H5Sselect_hyperslab(*memspace, H5S_SELECT_SET, &mstart0,
                                                  &stride, &pcount, &one),
