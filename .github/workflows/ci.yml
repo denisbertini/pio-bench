@@ -1,9 +1,9 @@
 name: build-and-verify
+# Manual trigger only: the authoritative test gate is the container run
+# (scripts/smoke.sh inside plasma-pp.sif on the cluster). CI remains
+# available on demand via Actions -> "Run workflow" (no auto-run emails).
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build-run:
