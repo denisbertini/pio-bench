@@ -106,11 +106,18 @@ public:
         if (settings_.collective_buffering)
             detail::h5_check(H5Pset_dxpl_mpio(*xfer, H5FD_MPIO_COLLECTIVE), "dxpl_mpio");
 
+        // "/fields/data" and "particles/*" live in groups: the default
+        // LCPL does NOT create intermediate groups (H5L "component not
+        // found") -- request automatic creation once, reuse everywhere.
+        detail::H5PropObj lcpl{H5Pcreate(H5P_LINK_CREATE)};
+        detail::h5_check(H5Pset_create_intermediate_group(*lcpl, 1),
+                         "link create intermediate group");
+
         Stopwatch w;
         {
             detail::H5SpaceObj filespace{H5Screate_simple(3, gdims, nullptr)};
             detail::H5DsetObj dset{H5Dcreate(*file, "/fields/data", H5T_NATIVE_DOUBLE,
-                                             *filespace, H5P_DEFAULT, H5P_DEFAULT,
+                                             *filespace, *lcpl, H5P_DEFAULT,
                                              H5P_DEFAULT)};
             detail::H5SpaceObj fsub{H5Dget_space(*dset)};
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, start, nullptr,
@@ -142,7 +149,7 @@ public:
                                 hid_t h5type) {
             detail::H5SpaceObj filespace{H5Screate_simple(1, &pgcount, nullptr)};
             detail::H5DsetObj dset{H5Dcreate(*file, dset_name, h5type, *filespace,
-                                             H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT)};
+                                             *lcpl, H5P_DEFAULT, H5P_DEFAULT)};
             detail::H5SpaceObj fsub{H5Dget_space(*dset)};
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, &pstart,
                                                  nullptr, &pcount, nullptr),
