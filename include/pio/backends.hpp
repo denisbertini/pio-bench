@@ -37,9 +37,17 @@ struct IoSettings {
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.
+    ///
+    /// PASS-THROUGH semantics (required by tuning harnesses, cf.
+    /// mpiio_evolve): MPI_Info hints OVERRIDE ROMIO's ROMIO_HINTS file/env
+    /// per-key, so the Info must stay EMPTY unless the user explicitly
+    /// asked via CLI. The old code always set collective_buffering=true,
+    /// which silently overrode romio_cb_* values injected by an external
+    /// tuning harness -- the measured config was then not the candidate's.
     Info make_romio_info() const {
         Info info;
-        info.set_if(collective_buffering, "collective_buffering", "true");
+        if (!collective_buffering)
+            info.set("collective_buffering", "false");  // explicit opt-out
         if (buffer_bytes)
             info.set("cb_buffer_size", std::to_string(*buffer_bytes));
         if (aggregators && *aggregators > 0)

@@ -81,10 +81,12 @@ Backends absent from the build report `SKIPPED`, not failure. Tunables:
 
 ## Integration (mpiio_evolve)
 
-Candidate JSON maps 1:1 onto flags — `romio.cb_nodes → --aggregators`,
-`romio.cb_buffer_size → --buffer`, `engine → --backend` — and the JSONL
-output feeds the measurement ledger. Built inside the compute container
-image, pinned by release tag.
+The tuning harness injects candidates via `ROMIO_HINTS` (and
+`lfs setstripe` on the data directory), so pio-bench must not pre-set
+MPI_Info keys: with no `--aggregators/--buffer/--no-cb` flags its Info is
+empty and the environment's hints take full effect. The JSONL output is
+the measurement feed; built inside the compute container image, pinned
+by release tag.
 
 ## License
 
