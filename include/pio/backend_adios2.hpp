@@ -2,10 +2,9 @@
 //
 // One .bp dataset per checkpoint:
 //   "fields/data"     3-D double, per-rank global block (ConstantDims)
-//   "particles/{x,y,z,px,py,pz,mass,id}"  1-D vars with LocalValueDim:
-//                     rank blocks are merged by the engine into the
-//                     global arrays -- the ADIOS-native "merge via
-//                     back end" pattern.
+//   "particles/{x,y,z,px,py,pz,mass,id}"  1-D double/uint64, explicit
+//                     global shape with per-rank blocks at rank_offset --
+//                     merged by the engine into the global arrays.
 //
 // ADIOS2 Put() requires a CONTIGUOUS local block; with ghost > 0 the
 // padded interior is not contiguous, so the field is gathered into a
@@ -63,16 +62,32 @@ public:
         auto var = io.DefineVariable<double>("fields/data", shape, fstart, fcount,
                                              adios2::ConstantDims);
 
-        // ---- particle member variables (rank blocks merged by engine) ----
-        const adios2::Dims lvd{adios2::LocalValueDim};
-        auto vx = io.DefineVariable<double>("particles/x", lvd);
-        auto vy = io.DefineVariable<double>("particles/y", lvd);
-        auto vz = io.DefineVariable<double>("particles/z", lvd);
-        auto vpx = io.DefineVariable<double>("particles/px", lvd);
-        auto vpy = io.DefineVariable<double>("particles/py", lvd);
-        auto vpz = io.DefineVariable<double>("particles/pz", lvd);
-        auto vm = io.DefineVariable<double>("particles/mass", lvd);
-        auto vi = io.DefineVariable<std::uint64_t>("particles/id", lvd);
+        // ---- particle member variables: explicit global arrays -------------
+        // shape = merged total, this rank's block at rank_offset -- exactly
+        // the field pattern, which works across BP engines. (LocalValueDim
+        // was the original choice, but ADIOS 2.12 has no Put(var, ptr, Dims)
+        // overload to pass the local size, and Put(var, ptr) on a
+        // LocalValueDim variable silently writes NOTHING -- particle
+        // read-back verify caught it as a read-side segfault.)
+        const adios2::Dims pshape{size_t(parts.global_count())};
+        const adios2::Dims pstart{size_t(parts.rank_offset())};
+        const adios2::Dims pcount{size_t(parts.local_count())};
+        auto vx = io.DefineVariable<double>("particles/x", pshape, pstart, pcount,
+                                            adios2::ConstantDims);
+        auto vy = io.DefineVariable<double>("particles/y", pshape, pstart, pcount,
+                                            adios2::ConstantDims);
+        auto vz = io.DefineVariable<double>("particles/z", pshape, pstart, pcount,
+                                            adios2::ConstantDims);
+        auto vpx = io.DefineVariable<double>("particles/px", pshape, pstart, pcount,
+                                             adios2::ConstantDims);
+        auto vpy = io.DefineVariable<double>("particles/py", pshape, pstart, pcount,
+                                             adios2::ConstantDims);
+        auto vpz = io.DefineVariable<double>("particles/pz", pshape, pstart, pcount,
+                                             adios2::ConstantDims);
+        auto vm = io.DefineVariable<double>("particles/mass", pshape, pstart,
+                                            pcount, adios2::ConstantDims);
+        auto vi = io.DefineVariable<std::uint64_t>("particles/id", pshape, pstart,
+                                                   pcount, adios2::ConstantDims);
 
         adios2::Engine engine = io.Open(path.string(), adios2::Mode::Write, comm_);
         engine.BeginStep();
@@ -110,20 +125,16 @@ public:
                 cm[i] = p[i].mass;
                 ci[i] = p[i].id;
             }
-            // LocalValueDim variables have NO intrinsic count: the local
-            // size MUST be passed to every Put, or nothing is written
-            // (silently -- caught only because --verify reads the
-            // particles back; the first adios2 "fast runs" wrote zero
-            // particle bytes).
-            const adios2::Dims cnt{n};
-            engine.Put(vx, cx.data(), cnt);
-            engine.Put(vy, cy.data(), cnt);
-            engine.Put(vz, cz.data(), cnt);
-            engine.Put(vpx, cpx.data(), cnt);
-            engine.Put(vpy, cpy.data(), cnt);
-            engine.Put(vpz, cpz.data(), cnt);
-            engine.Put(vm, cm.data(), cnt);
-            engine.Put(vi, ci.data(), cnt);
+            // count comes from the variable definition (explicit global
+            // block), so the two-argument Put is the complete form here.
+            engine.Put(vx, cx.data());
+            engine.Put(vy, cy.data());
+            engine.Put(vz, cz.data());
+            engine.Put(vpx, cpx.data());
+            engine.Put(vpy, cpy.data());
+            engine.Put(vpz, cpz.data());
+            engine.Put(vm, cm.data());
+            engine.Put(vi, ci.data());
             engine.EndStep();
             engine.Close(); // collective flush point
         }
@@ -167,8 +178,8 @@ public:
     }
 
     /// Read this rank's own block back out of the merged global arrays:
-    /// LocalValueDim variables become global-shape on read, so select
-    /// [rank_offset, local_count) of each member and reassemble the AoS.
+    /// select [rank_offset, local_count) of each member and reassemble
+    /// the AoS (same selection style as the field read).
     void read_particles(const std::filesystem::path& path, const Domain&,
                         const ParticleSet& src, std::vector<Particle>& out) const {
         const std::size_t n = src.local_count();

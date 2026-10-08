@@ -8,8 +8,9 @@
 //              into a contiguous staging vector (fast H5Dwrite path);
 //              --h5-strided instead hands HDF5 the AoS stride pattern.
 //              Both produce identical files.
-//   * ADIOS2 : per-member 1-D variables with LocalValueDim; the engine
-//              merges rank blocks into the global array automatically.
+//   * ADIOS2 : per-member 1-D variables with explicit global shape and
+//              per-rank blocks (ConstantDims); the engine merges them
+//              into the global arrays.
 //
 // Determinism: RNG seeded from (seed, rank) only, and id = global particle
 // index -- so a reader can verify provenance of every particle cheaply.

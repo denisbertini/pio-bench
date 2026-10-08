@@ -75,7 +75,7 @@ Backends absent from the build report `SKIPPED`, not failure. Tunables:
   so `H5Dwrite` takes its fast path; `--h5-strided` instead hands HDF5 the
   AoS stride pattern, producing byte-identical files — the gap between
   the two quantifies the in-library conversion cost. ADIOS2 pre-packs
-  per member into `LocalValueDim` variables.
+  per member into explicit global-shape variables.
 * With `ghost > 0` the ADIOS2 backend gathers the field interior into a
   temporary block (BP5 `Put` requires contiguous data).
 
