@@ -44,7 +44,11 @@ public:
                      const Field3d<double>& field, const ParticleSet& parts) const {
         WriteSplit split;
 
-        adios2::ADIOS adios(comm_);
+        // ADIOS2 3.x removed MPI_Comm from the ADIOS constructor (it is
+        // passed per-Open now, like 2.x's optional overload); using the
+        // pointer-based Put/Get everywhere keeps this source valid across
+        // ADIOS 2.6+ and 3.x.
+        adios2::ADIOS adios;
         adios2::IO io = adios.DeclareIO("pio_bench");
         io.SetEngine("BP5");
         if (settings_.buffer_bytes)
@@ -70,7 +74,7 @@ public:
         auto vm = io.DefineVariable<double>("particles/mass", lvd);
         auto vi = io.DefineVariable<std::uint64_t>("particles/id", lvd);
 
-        adios2::Engine engine = io.Open(path.string(), adios2::Mode::Write);
+        adios2::Engine engine = io.Open(path.string(), adios2::Mode::Write, comm_);
         engine.BeginStep();
 
         Stopwatch w;
@@ -85,7 +89,7 @@ public:
                     for (int j = d.ghost; j < d.ghost + d.local[1]; ++j)
                         for (int k = d.ghost; k < d.ghost + d.local[2]; ++k)
                             tmp[n++] = field.at(i, j, k);
-                engine.Put(var, tmp);
+                engine.Put(var, tmp.data());
             }
         }
         split.field_seconds = w.elapsed();
@@ -106,14 +110,14 @@ public:
                 cm[i] = p[i].mass;
                 ci[i] = p[i].id;
             }
-            engine.Put(vx, cx);
-            engine.Put(vy, cy);
-            engine.Put(vz, cz);
-            engine.Put(vpx, cpx);
-            engine.Put(vpy, cpy);
-            engine.Put(vpz, cpz);
-            engine.Put(vm, cm);
-            engine.Put(vi, ci);
+            engine.Put(vx, cx.data());
+            engine.Put(vy, cy.data());
+            engine.Put(vz, cz.data());
+            engine.Put(vpx, cpx.data());
+            engine.Put(vpy, cpy.data());
+            engine.Put(vpz, cpz.data());
+            engine.Put(vm, cm.data());
+            engine.Put(vi, ci.data());
             engine.EndStep();
             engine.Close(); // collective flush point
         }
@@ -123,7 +127,7 @@ public:
 
     void read_field(const std::filesystem::path& path, const Domain& d,
                     Field3d<double>& dst) const {
-        adios2::ADIOS adios(comm_);
+        adios2::ADIOS adios;
         adios2::IO io = adios.DeclareIO("pio_bench_read");
         io.SetEngine("BP5");
         auto var = io.InquireVariable<double>("fields/data");
@@ -134,13 +138,13 @@ public:
         const adios2::Dims fcount{size_t(d.local[0]), size_t(d.local[1]), size_t(d.local[2])};
         var.SetSelection(adios2::Box<adios2::Dims>(fstart, fcount));
 
-        adios2::Engine engine = io.Open(path.string(), adios2::Mode::Read);
+        adios2::Engine engine = io.Open(path.string(), adios2::Mode::Read, comm_);
         engine.BeginStep();
         if (d.ghost == 0) {
             engine.Get(var, dst.data(), adios2::Mode::Sync);
         } else {
             std::vector<double> tmp(d.interior_count());
-            engine.Get(var, tmp, adios2::Mode::Sync);
+            engine.Get(var, tmp.data(), adios2::Mode::Sync);
             std::size_t n = 0;
             for (int i = d.ghost; i < d.ghost + d.local[0]; ++i)
                 for (int j = d.ghost; j < d.ghost + d.local[1]; ++j)
