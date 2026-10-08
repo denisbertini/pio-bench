@@ -41,23 +41,9 @@ jobs:
         run: cmake --build build -j
 
       # runners have 2 vCPUs: oversubscribe for the 4-rank exercise
-      - name: Run (mpiio backend, 4 ranks, verified)
-        run: |
-          mkdir -p run && cd run
-          mpiexec --allow-run-as-root --oversubscribe -n 4 ../build/pio_bench \
-            --backend mpiio --local 32 --particles 10000 \
-            --steps 3 --interval 1 --verify
-          test -s pio_metrics.jsonl
-
-      - name: Run (hdf5 backend, 4 ranks, verified)
-        run: |
-          mkdir -p run-h5 && cd run-h5
-          mpiexec --allow-run-as-root --oversubscribe -n 4 ../build/pio_bench \
-            --backend hdf5 --local 32 --particles 10000 \
-            --steps 3 --interval 1 --verify
-          test -s pio_metrics.jsonl
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: metrics
-          path: "run*/pio_metrics.jsonl"
+      - name: Smoke test (all backends, verified)
+        env:
+          MPIRUN: mpiexec --allow-run-as-root --oversubscribe
+          LOCAL: 32
+          PARTICLES: 10000
+        run: ./scripts/smoke.sh

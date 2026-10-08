@@ -13,22 +13,26 @@ endif()
 
 find_package(MPI REQUIRED COMPONENTS CXX)
 
-# Probe the MPI_Type_create_subarray index width: MPI-3 says MPI_Aint,
-# older Intel MPI / MPICH / OMPI declare const int[]. Wrong width passed
-# across is silent little-endian corruption, so detect, never assume.
+# Detection, not a pass/fail test: MPI-3 declares the subarray extents as
+# MPI_Aint, but Open MPI (all 4.x/5.x) still ships the `const int[]`
+# signature. Passing the wrong width is silent little-endian corruption,
+# so we probe the actual headers and configure pio-bench accordingly --
+# and hand the result to the compiler via PIO_MPI_SUBARRAY_AINT below.
+# (Probe is phrased against the int signature so Open MPI reports "Passed".)
 include(CheckCXXSourceCompiles)
 set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)
 check_cxx_source_compiles("
 #include <mpi.h>
 int main() {
-  MPI_Aint s[1] = {4}, ss[1] = {2}, st[1] = {0};
+  int s[1] = {4}, ss[1] = {2}, st[1] = {0};
   MPI_Datatype t;
   return MPI_Type_create_subarray(1, s, ss, st, MPI_ORDER_C, MPI_DOUBLE, &t) == 0;
-}" PIO_MPI_SUBARRAY_AINT)
-if(PIO_MPI_SUBARRAY_AINT)
-  message(STATUS "pio_bench: MPI subarray uses MPI_Aint extents (MPI-3+)")
+}" PIO_MPI_SUBARRAY_INT)
+if(PIO_MPI_SUBARRAY_INT)
+  message(STATUS "pio_bench: subarray extents = int (Open MPI convention) -- detected, handled")
 else()
-  message(STATUS "pio_bench: MPI subarray uses int extents (pre-MPI-3 signature)")
+  message(STATUS "pio_bench: subarray extents = MPI_Aint (MPI-3 conformant) -- detected, handled")
+  target_compile_definitions(pio_bench PRIVATE PIO_MPI_SUBARRAY_AINT=1)
 endif()
 
 add_executable(pio_bench src/pio_bench.cpp)

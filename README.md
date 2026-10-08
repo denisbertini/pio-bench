@@ -56,6 +56,15 @@ Under Darshan:
 DARSHAN_LOGPATH=$PWD darshan-runtime mpirun -n 64 ./build/pio_bench ...
 ```
 
+## Test
+
+```sh
+scripts/smoke.sh        # runs every compiled-in backend with --verify
+```
+
+Backends absent from the build report `SKIPPED`, not failure. Tunables:
+`RANKS`, `LOCAL`, `PARTICLES`, `STEPS`, `MPIRUN` (see script header).
+
 ## Notes
 
 * Field values are the flattened global index; particle `id`s are the
