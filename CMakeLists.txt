@@ -82,15 +82,38 @@ endif()
 if(PIO_WITH_ADIOS2)
   find_package(ADIOS2 CONFIG QUIET)
   if(ADIOS2_FOUND)
-    target_compile_definitions(pio_bench PRIVATE PIO_HAVE_ADIOS2=1)
     # adios2::cxx11 was deprecated in favour of adios2::cxx; accept either
     # so the same recipe works across ADIOS2 versions.
     if(TARGET adios2::cxx)
-      target_link_libraries(pio_bench PRIVATE adios2::cxx)
+      set(PIO_ADIOS2_TARGET adios2::cxx)
     else()
-      target_link_libraries(pio_bench PRIVATE adios2::cxx11)
+      set(PIO_ADIOS2_TARGET adios2::cxx11)
     endif()
-    message(STATUS "pio_bench: ADIOS2 backend ON")
+    # ADIOS2's MPI bindings are a compile-time option (ADIOS2_USE_MPI).
+    # A serial-built ADIOS2 has NO communicator anywhere in its C++ API
+    # and cannot merge multi-rank output -- probe it, don't let the
+    # compiler discover it via header errors mid-build.
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX ${PIO_ADIOS2_TARGET})
+    check_cxx_source_compiles("
+#include <adios2.h>
+#include <mpi.h>
+int main() {
+  adios2::ADIOS a(MPI_COMM_WORLD);
+  adios2::IO io = a.DeclareIO(\"probe\");
+  (void)io;
+  return 0;
+}" PIO_ADIOS2_HAS_MPI)
+    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)  # restore
+    if(PIO_ADIOS2_HAS_MPI)
+      target_compile_definitions(pio_bench PRIVATE PIO_HAVE_ADIOS2=1)
+      target_link_libraries(pio_bench PRIVATE ${PIO_ADIOS2_TARGET})
+      message(STATUS "pio_bench: ADIOS2 backend ON (MPI-enabled build detected)")
+    else()
+      message(STATUS "pio_bench: ADIOS2 found but WITHOUT MPI bindings -- "
+                     "backend compiled OUT (this ADIOS2 cannot merge "
+                     "multi-rank output; rebuild it with -DADIOS2_USE_MPI=ON)")
+    endif()
   else()
     message(STATUS "pio_bench: ADIOS2 not found -- backend compiled OUT")
   endif()
