@@ -110,14 +110,20 @@ public:
                 cm[i] = p[i].mass;
                 ci[i] = p[i].id;
             }
-            engine.Put(vx, cx.data());
-            engine.Put(vy, cy.data());
-            engine.Put(vz, cz.data());
-            engine.Put(vpx, cpx.data());
-            engine.Put(vpy, cpy.data());
-            engine.Put(vpz, cpz.data());
-            engine.Put(vm, cm.data());
-            engine.Put(vi, ci.data());
+            // LocalValueDim variables have NO intrinsic count: the local
+            // size MUST be passed to every Put, or nothing is written
+            // (silently -- caught only because --verify reads the
+            // particles back; the first adios2 "fast runs" wrote zero
+            // particle bytes).
+            const adios2::Dims cnt{n};
+            engine.Put(vx, cx.data(), cnt);
+            engine.Put(vy, cy.data(), cnt);
+            engine.Put(vz, cz.data(), cnt);
+            engine.Put(vpx, cpx.data(), cnt);
+            engine.Put(vpy, cpy.data(), cnt);
+            engine.Put(vpz, cpz.data(), cnt);
+            engine.Put(vm, cm.data(), cnt);
+            engine.Put(vi, ci.data(), cnt);
             engine.EndStep();
             engine.Close(); // collective flush point
         }
