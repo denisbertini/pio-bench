@@ -18,9 +18,12 @@ int run_selected(const BenchConfig& cfg) {
     if constexpr (Backend::available) {
         return PicBenchmark<Backend>(cfg, MPI_COMM_WORLD).run();
     } else {
+        // Exit code 2 = "not available in this build" (smoke.sh maps it to
+        // SKIPPED; also matched by message text as a belt-and-braces).
         if (rank_of(MPI_COMM_WORLD) == 0)
-            std::cerr << "-E- : this build has no " << Backend::name
-                      << " support (rebuild with it enabled)\n";
+            std::cerr << "-I- : SKIPPED: " << Backend::name
+                      << " is not compiled into this build"
+                         " (library unavailable or built without MPI)\n";
         return 2;
     }
 }

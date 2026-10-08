@@ -37,13 +37,17 @@ for b in mpiio hdf5 adios2; do
     echo "=== backend: $b ==="
     ( cd "$WORK" && $MPIRUN -n "$RANKS" "$BIN" \
         --backend "$b" --local "$LOCAL" --particles "$PARTICLES" \
-        --steps "$STEPS" --interval 1 --verify )
-    rc=$?
-    case $rc in
-        0) echo "-- $b: PASS"; ran=$((ran+1));;
-        2) echo "-- $b: SKIPPED (not compiled into this build)";;
-        *) echo "-- $b: FAIL (rc=$rc)"; fail=1;;
-    esac
+        --steps "$STEPS" --interval 1 --verify ) 2>&1 | tee "$WORK/$b.log"
+    rc=${PIPESTATUS[0]}
+    if grep -q "SKIPPED:" "$WORK/$b.log"; then
+        echo "-- $b: SKIPPED (not compiled into this build)"
+    else
+        case $rc in
+            0) echo "-- $b: PASS"; ran=$((ran+1));;
+            2) echo "-- $b: SKIPPED (not compiled into this build)";;
+            *) echo "-- $b: FAIL (rc=$rc)"; fail=1;;
+        esac
+    fi
     echo
 done
 
