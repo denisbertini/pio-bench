@@ -140,8 +140,10 @@ public:
                              MPI_Datatype etype) {
         if (ndims < 1 || ndims > 3)
             throw MpiError("subarray ndims out of range");
-        auto narrow = [](const MPI_Aint in[], SubarrayIndex out[]) {
-            for (int i = 0; i < 3; ++i) {
+        // Only `ndims` entries of the inputs are valid (subarray_1d passes
+        // single values!) -- never touch beyond, pad the rest with 1.
+        auto narrow = [ndims](const MPI_Aint in[], SubarrayIndex out[]) {
+            for (int i = 0; i < ndims; ++i) {
                 if (in[i] < 0)
                     throw MpiError("negative subarray extent");
                 if (in[i] > static_cast<MPI_Aint>(
@@ -152,6 +154,8 @@ public:
                         "upgrade the MPI stack for larger arrays)");
                 out[i] = static_cast<SubarrayIndex>(in[i]);
             }
+            for (int i = ndims; i < 3; ++i)
+                out[i] = 1;
         };
         SubarrayIndex s[3], ss[3], st[3];
         narrow(sizes, s);
