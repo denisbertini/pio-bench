@@ -130,6 +130,13 @@ public:
         adios2::ADIOS adios;
         adios2::IO io = adios.DeclareIO("pio_bench_read");
         io.SetEngine("BP5");
+
+        // ADIOS2 read ordering rule: the variables of a file only appear
+        // in the IO AFTER Open(Read) + BeginStep() have loaded its
+        // metadata -- inquiring before returns nothing (smoke test caught
+        // exactly this).
+        adios2::Engine engine = io.Open(path.string(), adios2::Mode::Read, comm_);
+        engine.BeginStep();
         auto var = io.InquireVariable<double>("fields/data");
         if (!var)
             throw std::runtime_error("adios2: fields/data not found in " + path.string());
@@ -138,8 +145,6 @@ public:
         const adios2::Dims fcount{size_t(d.local[0]), size_t(d.local[1]), size_t(d.local[2])};
         var.SetSelection(adios2::Box<adios2::Dims>(fstart, fcount));
 
-        adios2::Engine engine = io.Open(path.string(), adios2::Mode::Read, comm_);
-        engine.BeginStep();
         if (d.ghost == 0) {
             engine.Get(var, dst.data(), adios2::Mode::Sync);
         } else {
