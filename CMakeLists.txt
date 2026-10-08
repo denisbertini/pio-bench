@@ -32,13 +32,16 @@ if(PIO_MPI_SUBARRAY_INT)
   message(STATUS "pio_bench: subarray extents = int (Open MPI convention) -- detected, handled")
 else()
   message(STATUS "pio_bench: subarray extents = MPI_Aint (MPI-3 conformant) -- detected, handled")
-  target_compile_definitions(pio_bench PRIVATE PIO_MPI_SUBARRAY_AINT=1)
 endif()
 
 add_executable(pio_bench src/pio_bench.cpp)
 target_include_directories(pio_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(pio_bench PRIVATE MPI::MPI_CXX)
 target_compile_options(pio_bench PRIVATE -Wall -Wextra)
+if(NOT PIO_MPI_SUBARRAY_INT)
+  # (applied here, not at probe time: the target does not exist yet there)
+  target_compile_definitions(pio_bench PRIVATE PIO_MPI_SUBARRAY_AINT=1)
+endif()
 
 # ---- optional backends (compile-time availability, cf. pio/backends.hpp) --
 option(PIO_WITH_HDF5  "Build the parallel HDF5 backend"  ON)
@@ -82,20 +85,30 @@ endif()
 if(PIO_WITH_ADIOS2)
   find_package(ADIOS2 CONFIG QUIET)
   if(ADIOS2_FOUND)
-    # adios2::cxx11 was deprecated in favour of adios2::cxx; accept either
-    # so the same recipe works across ADIOS2 versions.
-    if(TARGET adios2::cxx)
+    # ADIOS2 >= 2.12 split the MPI API into its OWN target (adios2::cxx_mpi):
+    # only it carries the ADIOS2_USE_MPI interface macro that #if-guards
+    # ADIOS(MPI_Comm) and Open(..., comm). The plain cxx target therefore
+    # LOOKS serial even on a perfectly MPI-enabled install -- probe order
+    # matters, and the compile test below is still the final judge.
+    if(TARGET adios2::cxx_mpi)
+      set(PIO_ADIOS2_TARGET adios2::cxx_mpi)
+    elseif(TARGET adios2::cxx11)
+      set(PIO_ADIOS2_TARGET adios2::cxx11)
+    elseif(TARGET adios2::cxx)
       set(PIO_ADIOS2_TARGET adios2::cxx)
     else()
-      set(PIO_ADIOS2_TARGET adios2::cxx11)
+      set(PIO_ADIOS2_TARGET "")
     endif()
-    # ADIOS2's MPI bindings are a compile-time option (ADIOS2_USE_MPI).
-    # A serial-built ADIOS2 has NO communicator anywhere in its C++ API
-    # and cannot merge multi-rank output -- probe it, don't let the
-    # compiler discover it via header errors mid-build.
-    include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX ${PIO_ADIOS2_TARGET})
-    check_cxx_source_compiles("
+    if(NOT PIO_ADIOS2_TARGET)
+      message(STATUS "pio_bench: ADIOS2 package found but no C++ target -- backend compiled OUT")
+    else()
+      # ADIOS2's MPI bindings are a compile-time option (ADIOS2_USE_MPI).
+      # A serial-built ADIOS2 has NO communicator anywhere in its C++ API
+      # and cannot merge multi-rank output -- probe it, don't let the
+      # compiler discover it via header errors mid-build.
+      include(CheckCXXSourceCompiles)
+      set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX ${PIO_ADIOS2_TARGET})
+      check_cxx_source_compiles("
 #include <adios2.h>
 #include <mpi.h>
 int main() {
@@ -104,15 +117,17 @@ int main() {
   (void)io;
   return 0;
 }" PIO_ADIOS2_HAS_MPI)
-    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)  # restore
-    if(PIO_ADIOS2_HAS_MPI)
-      target_compile_definitions(pio_bench PRIVATE PIO_HAVE_ADIOS2=1)
-      target_link_libraries(pio_bench PRIVATE ${PIO_ADIOS2_TARGET})
-      message(STATUS "pio_bench: ADIOS2 backend ON (MPI-enabled build detected)")
-    else()
-      message(STATUS "pio_bench: ADIOS2 found but WITHOUT MPI bindings -- "
-                     "backend compiled OUT (this ADIOS2 cannot merge "
-                     "multi-rank output; rebuild it with -DADIOS2_USE_MPI=ON)")
+      set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)  # restore
+      if(PIO_ADIOS2_HAS_MPI)
+        target_compile_definitions(pio_bench PRIVATE PIO_HAVE_ADIOS2=1)
+        target_link_libraries(pio_bench PRIVATE ${PIO_ADIOS2_TARGET})
+        message(STATUS "pio_bench: ADIOS2 backend ON (MPI-enabled build detected, "
+                       "target ${PIO_ADIOS2_TARGET})")
+      else()
+        message(STATUS "pio_bench: ADIOS2 found (${PIO_ADIOS2_TARGET}) but WITHOUT usable "
+                       "MPI bindings -- backend compiled OUT (this ADIOS2 cannot "
+                       "merge multi-rank output; rebuild it with -DADIOS2_USE_MPI=ON)")
+      endif()
     endif()
   else()
     message(STATUS "pio_bench: ADIOS2 not found -- backend compiled OUT")
