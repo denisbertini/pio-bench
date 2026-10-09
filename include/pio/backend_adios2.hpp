@@ -92,13 +92,24 @@ public:
         adios2::Engine engine = io.Open(path.string(), adios2::Mode::Write, comm_);
         engine.BeginStep();
 
+        // ADIOS2 Put() MEMORY CONTRACT: the copy may be deferred until
+        // EndStep -- BP5 keeps the USER POINTER for blocks exceeding the
+        // staging pool (BufferVSize, default 128 MiB) instead of copying.
+        // Every buffer handed to Put must therefore stay alive until after
+        // EndStep. Field staging is hoisted to this scope for exactly that
+        // reason: a tmp destroyed before EndStep made BP5 flush freed
+        // memory (verify caught it at local=256, ALL field cells wrong;
+        // invisible at local=64 where the 2 MiB block fit the pool and
+        // was copied eagerly).
+        std::vector<double> tmp;
+
         Stopwatch w;
         {
             // contiguous interior block (skipped when ghost == 0)
             if (d.ghost == 0) {
                 engine.Put(var, field.data());
             } else {
-                std::vector<double> tmp(d.interior_count());
+                tmp.resize(d.interior_count());
                 std::size_t n = 0;
                 for (int i = d.ghost; i < d.ghost + d.local[0]; ++i)
                     for (int j = d.ghost; j < d.ghost + d.local[1]; ++j)
