@@ -76,6 +76,11 @@ Backends absent from the build report `SKIPPED`, not failure. Tunables:
   AoS stride pattern, producing byte-identical files — the gap between
   the two quantifies the in-library conversion cost. ADIOS2 pre-packs
   per member into explicit global-shape variables.
+* ADIOS2/BP5 computes per-block min/max/sum statistics on every `Put` by
+  default (StatsLevel 2) — a full extra pass over the payload on the writer
+  CPU, the leading suspect for BP5's write-rate gap vs. raw MPI-IO.
+  `--no-adi-stats` sets StatsLevel 0 to isolate that cost; the file then
+  carries no block statistics (affects later query/transform tools, not reads).
 * With `ghost > 0` the ADIOS2 backend gathers the field interior into a
   temporary block (BP5 `Put` requires contiguous data).
 

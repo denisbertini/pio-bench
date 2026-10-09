@@ -38,7 +38,7 @@ namespace pio {
 /// Instrument version: stamped into every metrics line so fitness data
 /// always self-documents the binary that produced it (bump on ANY change
 /// that can move measured numbers; tag the repo in lockstep).
-inline constexpr const char* kBenchmarkVersion = "0.2.2";
+inline constexpr const char* kBenchmarkVersion = "0.2.3";
 
 static_assert(IoBackend<MpiIoBackend>);
 static_assert(IoBackend<Hdf5Backend>);
@@ -236,6 +236,8 @@ private:
             out << ",\"buffer_bytes\":" << *cfg_.buffer_bytes;
         if (Backend::name == "hdf5")
             out << ",\"h5_prepack\":" << (cfg_.h5_prepack ? "true" : "false");
+        if (Backend::name == "adios2")
+            out << ",\"adi_stats\":" << (cfg_.adi_stats ? "true" : "false");
         out << ",\"seed\":" << cfg_.seed << "}\n";
     }
 

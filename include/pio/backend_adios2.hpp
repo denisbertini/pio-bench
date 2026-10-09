@@ -50,6 +50,12 @@ public:
         adios2::ADIOS adios;
         adios2::IO io = adios.DeclareIO("pio_bench");
         io.SetEngine("BP5");
+        // BP5 per-block statistics (StatsLevel: 2=full default, 1=min/max,
+        // 0=none): level 2 computes min/max/sum over EVERY written block --
+        // an extra full pass over the payload on the writer CPU. --no-adi-stats
+        // isolates that cost (the main suspect in the adios2-vs-mpiio gap).
+        if (!settings_.adi_stats)
+            io.SetParameter("StatsLevel", "0");
         if (settings_.buffer_bytes)
             io.SetParameter("BufferVSize", std::to_string(*settings_.buffer_bytes));
         if (settings_.aggregators && *settings_.aggregators > 0)

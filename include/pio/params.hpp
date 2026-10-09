@@ -118,6 +118,9 @@ struct BenchConfig {
     bool collective_buffering{true};           // ROMIO hint (mpiio/hdf5)
     bool h5_prepack{true};                     // hdf5: contiguous staging writes
                                                // (false = in-library strided)
+    bool adi_stats{true};                      // adios2: BP5 per-block statistics
+                                               // (false = StatsLevel=0, skip the
+                                               //  min/max/sum pass over all data)
 
     // ---- time loop ------------------------------------------------------------
     int steps{10};
@@ -146,6 +149,8 @@ struct BenchConfig {
         "  --no-cb                disable ROMIO collective buffering\n"
         "  --h5-strided           hdf5: in-library strided particle writes\n"
         "                         (default: pre-packed contiguous writes)\n"
+        "  --no-adi-stats         adios2: BP5 StatsLevel=0 (skip per-block\n"
+        "                         min/max/sum statistics of every written block)\n"
         "  --steps N              timesteps                       (10)\n"
         "  --interval N           checkpoint every N steps        (1)\n"
         "  --max-checkpoints N    cap checkpoints, -1 unlimited   (-1)\n"
@@ -219,6 +224,8 @@ struct BenchConfig {
                 cfg.collective_buffering = false;
             } else if (key == "h5-strided") {
                 cfg.h5_prepack = false;
+            } else if (key == "no-adi-stats") {
+                cfg.adi_stats = false;
             } else if (key == "steps") {
                 cfg.steps = static_cast<int>(detail::parse_ll(need_value(i, key), key));
             } else if (key == "interval") {
@@ -275,6 +282,8 @@ struct BenchConfig {
            << " keep_files=" << (keep_files ? "on" : "off");
         if (backend == BackendKind::Hdf5)
             os << " h5_write=" << (h5_prepack ? "prepack" : "strided");
+        if (backend == BackendKind::Adios2)
+            os << " adi_stats=" << (adi_stats ? "on" : "off");
         return os.str();
     }
 };

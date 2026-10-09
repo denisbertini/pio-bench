@@ -30,10 +30,11 @@ struct IoSettings {
     std::optional<std::size_t> buffer_bytes;
     bool collective_buffering{true};
     bool h5_prepack{true};  // hdf5: gather members before H5Dwrite (cf. --h5-strided)
+    bool adi_stats{true};   // adios2: BP5 per-block stats (cf. --no-adi-stats)
 
     static IoSettings from(const BenchConfig& c) {
         return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
-                          c.h5_prepack};
+                          c.h5_prepack, c.adi_stats};
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.
