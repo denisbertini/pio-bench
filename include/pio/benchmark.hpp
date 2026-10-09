@@ -38,7 +38,7 @@ namespace pio {
 /// Instrument version: stamped into every metrics line so fitness data
 /// always self-documents the binary that produced it (bump on ANY change
 /// that can move measured numbers; tag the repo in lockstep).
-inline constexpr const char* kBenchmarkVersion = "0.2.3";
+inline constexpr const char* kBenchmarkVersion = "0.2.4";
 
 static_assert(IoBackend<MpiIoBackend>);
 static_assert(IoBackend<Hdf5Backend>);

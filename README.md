@@ -93,6 +93,14 @@ empty and the environment's hints take full effect. The JSONL output is
 the measurement feed; built inside the compute container image, pinned
 by release tag.
 
+External hint channel: `PIOB_ROMIO_HINTS="cb_nodes=4;romio_cb_write=disable"`
+(pairs `;`- or `:`-separated) is injected into the file-open `MPI_Info` on
+top of the environment, before CLI flags (which always win per key). This
+is the portable surface — app-side MPI_Info works on every MPI/ROMIO
+build, whereas the ROMIO_HINTS *file* was removed in ROMIO 3.2 and
+`MPI_Info_env` is an MPICH-family convention. The banner always echoes the
+injected value (`pio_hints="..."`) so no run hides its configuration.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

@@ -284,6 +284,10 @@ struct BenchConfig {
             os << " h5_write=" << (h5_prepack ? "prepack" : "strided");
         if (backend == BackendKind::Adios2)
             os << " adi_stats=" << (adi_stats ? "on" : "off");
+        // Audit: externally injected ROMIO hints (harness channel) are
+        // always disclosed -- a run must never hide its own config.
+        if (const char* ph = std::getenv("PIOB_ROMIO_HINTS"); ph && *ph)
+            os << " pio_hints=\"" << ph << "\"";
         return os.str();
     }
 };

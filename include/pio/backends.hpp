@@ -10,8 +10,10 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -45,8 +47,31 @@ struct IoSettings {
     /// asked via CLI. The old code always set collective_buffering=true,
     /// which silently overrode romio_cb_* values injected by an external
     /// tuning harness -- the measured config was then not the candidate's.
+    ///
+    /// External hint channel (0.2.4): PIOB_ROMIO_HINTS="cb_nodes=4;
+    /// romio_cb_write=enable" (pairs separated by ';' or ':', key=value)
+    /// is injected FIRST, so explicit CLI flags still win per-key. The
+    /// app-side MPI_Info at MPI_File_open is THE portable hint surface --
+    /// it works on any MPI/ROMIO build, unlike env conventions (the
+    /// ROMIO_HINTS file was removed in ROMIO 3.2; MPI_Info_env is an
+    /// MPICH-family extension whose behaviour under OMPI's romio341 is
+    /// unresolved). Values are passed through unvalidated: the tuning
+    /// harness owns the key whitelist.
     Info make_romio_info() const {
         Info info;
+        if (const char* env = std::getenv("PIOB_ROMIO_HINTS")) {
+            std::string s(env);
+            std::size_t pos = 0;
+            while (pos < s.size()) {
+                std::size_t end = s.find_first_of(";:", pos);
+                if (end == std::string::npos) end = s.size();
+                std::string kv = s.substr(pos, end - pos);
+                const std::size_t eq = kv.find('=');
+                if (eq != std::string::npos && eq + 1 < kv.size())
+                    info.set(kv.substr(0, eq), kv.substr(eq + 1));
+                pos = end + 1;
+            }
+        }
         if (!collective_buffering)
             info.set("collective_buffering", "false");  // explicit opt-out
         if (buffer_bytes)
