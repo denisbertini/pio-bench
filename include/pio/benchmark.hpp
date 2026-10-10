@@ -125,6 +125,24 @@ public:
                 if (rank_ == 0) {
                     std::error_code ec;
                     std::filesystem::remove_all(path, ec); // dirs (.bp) too
+                    // openPMD backends declare NO extension (extension ==
+                    // "") and mint their own on-disk names: "<base>.h5",
+                    // fileBased ADIOS2 "<base>_<iter>.bp", ...  Remove
+                    // every entry carrying this checkpoint's prefix.
+                    if (std::string_view(Backend::extension).empty()) {
+                        const std::string stem =
+                            path.filename().string(); // unique per chkpt
+                        for (std::filesystem::directory_iterator
+                                 it(path.parent_path(), ec),
+                                 end;
+                             !ec && it != end; it.increment(ec)) {
+                            const std::string f =
+                                it->path().filename().string();
+                            if (f.size() > stem.size() &&
+                                f.compare(0, stem.size(), stem) == 0)
+                                std::filesystem::remove_all(it->path(), ec);
+                        }
+                    }
                 }
                 PIO_MPI(MPI_Barrier(comm_)); // nobody opens it before removal ends
             }
