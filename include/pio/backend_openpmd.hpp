@@ -35,6 +35,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "pio/backends.hpp"
@@ -64,11 +65,21 @@ inline constexpr SoaMember members[] = {
 };
 
 /// openPMD appends the engine suffix (.h5/.bp) when the base has none --
-/// write and read must pass the identical base + engine to resolve it.
+/// write and read must pass the identical base + backend to resolve it.
+/// Current API (openPMD >= 0.15 / dev): backend chosen by JSON options,
+/// ctor is Series(path, access, comm, options). The CMake probe picks the
+/// ctor form; PIO_PMD_LEGACY_CTOR selects the old positional-engine one.
 inline ::openPMD::Series make_series(const std::filesystem::path& base,
-                                     const char* engine,
+                                     const char* backend,
                                      ::openPMD::Access at, MPI_Comm comm) {
-    return ::openPMD::Series(base.string(), at, std::string(engine), comm);
+#ifdef PIO_PMD_LEGACY_CTOR
+    const std::string engine =
+        std::string_view(backend) == "adios2" ? "BP5" : "HDF5";
+    return ::openPMD::Series(base.string(), at, engine, comm);
+#else
+    return ::openPMD::Series(base.string(), at, comm,
+                             std::string("{\"backend\":\"") + backend + "\"}");
+#endif
 }
 
 } // namespace openpmd_detail
@@ -87,7 +98,7 @@ public:
         WriteSplit split;
 
         om::Series series = openpmd_detail::make_series(
-            path, engine_, om::Access::Create, comm_);
+            path, backend_, om::Access::Create, comm_);
         auto iteration = series.iterations[0];
 
         const om::Shape gsz{d.global[0], d.global[1], d.global[2]};
@@ -120,6 +131,10 @@ public:
         split.field_seconds = w.elapsed();
 
         // ---- particles: standard SoA species -----------------------------
+        // Type-safe traversal: species[record] is a PatchRecord (writable
+        // directly for SCALAR records like mass/id); [record][comp] is the
+        // PatchRecordComponent leaf. Generic lambda covers both shapes
+        // without naming the (version-sensitive) classes.
         w.restart();
         const std::size_t n = parts.local_count();
         if (n > 0) {
@@ -134,14 +149,20 @@ public:
                 for (std::size_t k = 0; k < n; ++k)
                     col[k] = p[k].*(m.dm);
                 auto rec = species[m.record];
-                om::ParticlePatches ds(rec); // handle, shares the record
-                if (m.comp)
-                    ds = rec[m.comp];
-                ds.resetDataset(om::Dataset(om::determineType<double>(), gcount));
-                ds.setChunkSize(lcount);
-                ds.storeChunk(col.data(), roff, lcount);
+                if (m.comp) {
+                    auto ds = rec[m.comp];
+                    ds.resetDataset(
+                        om::Dataset(om::determineType<double>(), gcount));
+                    ds.setChunkSize(lcount);
+                    ds.storeChunk(col.data(), roff, lcount);
+                } else {
+                    rec.resetDataset(
+                        om::Dataset(om::determineType<double>(), gcount));
+                    rec.setChunkSize(lcount);
+                    rec.storeChunk(col.data(), roff, lcount);
+                }
             }
-            // id: the standard unsigned-64 particle id record.
+            // id: the standard unsigned-64 particle id record (scalar).
             std::vector<std::uint64_t> ids(n);
             for (std::size_t k = 0; k < n; ++k)
                 ids[k] = p[k].id;
@@ -162,7 +183,7 @@ public:
                     Field3d<double>& dst) const {
         namespace om = ::openPMD;
         om::Series series = openpmd_detail::make_series(
-            path, engine_, om::Access::Read, comm_);
+            path, backend_, om::Access::Read, comm_);
         auto iteration = series.iterations[0];
         auto rho = iteration.meshes["field"]["rho"];
 
@@ -191,7 +212,7 @@ public:
             return;
 
         om::Series series = openpmd_detail::make_series(
-            path, engine_, om::Access::Read, comm_);
+            path, backend_, om::Access::Read, comm_);
         auto iteration = series.iterations[0];
         auto species = iteration.particles["electrons"];
 
@@ -202,10 +223,12 @@ public:
         cols.reserve(std::size(openpmd_detail::members));
         for (const auto& m : openpmd_detail::members) {
             auto rec = species[m.record];
-            om::ParticlePatches ds(rec);
-            if (m.comp)
-                ds = rec[m.comp];
-            cols.push_back(ds.loadChunk<double>(roff, lcount));
+            if (m.comp) {
+                auto ds = rec[m.comp];
+                cols.push_back(ds.loadChunk<double>(roff, lcount));
+            } else {
+                cols.push_back(rec.loadChunk<double>(roff, lcount));
+            }
         }
         auto ids = species["id"].loadChunk<std::uint64_t>(roff, lcount);
         series.flush();
@@ -221,7 +244,7 @@ public:
 protected:
     MPI_Comm comm_;
     IoSettings settings_;
-    const char* engine_;
+    const char* backend_;  // openPMD backend name: "hdf5" | "adios2"
 };
 
 class OpenPmdHdf5Backend : public OpenPmdBase {
@@ -230,7 +253,7 @@ public:
     static constexpr std::string_view extension = ""; // openPMD appends .h5
     static constexpr bool available = true;
     OpenPmdHdf5Backend(MPI_Comm comm, const IoSettings& s)
-        : OpenPmdBase(comm, s), engine_("HDF5") {}
+        : OpenPmdBase(comm, s), backend_("hdf5") {}
 };
 
 class OpenPmdAdios2Backend : public OpenPmdBase {
@@ -239,7 +262,7 @@ public:
     static constexpr std::string_view extension = ""; // openPMD appends .bp
     static constexpr bool available = true;
     OpenPmdAdios2Backend(MPI_Comm comm, const IoSettings& s)
-        : OpenPmdBase(comm, s), engine_("BP5") {}
+        : OpenPmdBase(comm, s), backend_("adios2") {}
 };
 
 #else // !PIO_HAVE_OPENPMD -- compile-time stubs keep the concept satisfied

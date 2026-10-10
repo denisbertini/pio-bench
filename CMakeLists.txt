@@ -138,30 +138,63 @@ endif()
 if(PIO_WITH_OPENPMD)
   find_package(openPMD CONFIG QUIET)
   if(openPMD_FOUND AND TARGET openPMD::openPMD)
-    # openPMD's MPI support is a build option too -- probe the MPI-Series
-    # constructor directly (same probe-don't-guess rule as ADIOS2): a
-    # serial openPMD has no Series(path, access, engine, comm) overload.
+    # API archaeology: current openPMD (>=0.15, and the image's git build)
+    # constructs Series as (path, access, comm, options-JSON) and selects
+    # the backend via {"backend": "..."}; the positional engine-string ctor
+    # only exists in old releases. Probe BOTH forms -- and make the probe
+    # exercise the exact call surface the backend uses (scalar record vs
+    # component storeChunk, void* store, typed shared_ptr load), so a
+    # "compiled OUT" verdict means the build is truly incompatible, not
+    # that one guessed signature missed.
     include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX openPMD::openPMD)
-    check_cxx_source_compiles("
+    set(PIO_PMD_PROBE "
 #include <openPMD/openPMD.hpp>
 #include <mpi.h>
 int main() {
   openPMD::Series s(\"probe_only_unused\", openPMD::Access::Create,
-                    std::string(\"HDF5\"), MPI_COMM_WORLD);
-  (void)s.iterations[0];
+                    MPI_COMM_WORLD, std::string(\"{\\\"backend\\\":\\\"hdf5\\\"}\"));
+  auto it = s.iterations[0];
+  double buf[2] = {1.0, 2.0};
+  auto comp = it.meshes[\"m\"][\"c\"];
+  comp.resetDataset(openPMD::Dataset(openPMD::determineType<double>(),
+                                     openPMD::Shape{2}));
+  comp.setChunkSize(openPMD::Shape{1});
+  comp.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
+  auto scalar = it.particles[\"sp\"][\"mass\"];      // scalar record
+  scalar.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
+  auto px = it.particles[\"sp\"][\"position\"][\"x\"]; // component leaf
+  px.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
+  (void)px.loadChunk<double>(openPMD::Offset{0}, openPMD::Extent{2});
+  (void)comp.loadChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
+  s.flush();
   return 0;
-}" PIO_OPENPMD_HAS_MPI)
+}")
+    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX openPMD::openPMD)
+    check_cxx_source_compiles("${PIO_PMD_PROBE}" PIO_PMD_CTOR_CURRENT)
+    if(NOT PIO_PMD_CTOR_CURRENT)
+      # legacy form: Series(path, access, engine, comm)
+      string(REPLACE "MPI_COMM_WORLD, std::string(\"{\\\"backend\\\":\\\"hdf5\\\"}\")"
+                     "std::string(\"HDF5\"), MPI_COMM_WORLD"
+                     PIO_PMD_PROBE_LEGACY "${PIO_PMD_PROBE}")
+      check_cxx_source_compiles("${PIO_PMD_PROBE_LEGACY}" PIO_PMD_CTOR_LEGACY)
+    endif()
     set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)  # restore
-    if(PIO_OPENPMD_HAS_MPI)
+    if(PIO_PMD_CTOR_CURRENT)
       target_compile_definitions(pio_bench PRIVATE PIO_HAVE_OPENPMD=1)
       target_link_libraries(pio_bench PRIVATE openPMD::openPMD)
       message(STATUS "pio_bench: openPMD backend ON (pmd_hdf5 + pmd_adios2, "
-                     "MPI-enabled openPMD detected)")
+                     "current (path,access,comm,options) API)")
+    elseif(PIO_PMD_CTOR_LEGACY)
+      target_compile_definitions(pio_bench PRIVATE PIO_HAVE_OPENPMD=1
+                                 PIO_PMD_LEGACY_CTOR=1)
+      target_link_libraries(pio_bench PRIVATE openPMD::openPMD)
+      message(STATUS "pio_bench: openPMD backend ON (legacy engine-string ctor)")
     else()
-      message(STATUS "pio_bench: openPMD found but WITHOUT usable MPI ctor -- "
-                     "pmd_* backends compiled OUT (rebuild openPMD with "
-                     "-DopenPMD_USE_MPI=ON)")
+      message(STATUS "pio_bench: openPMD found but NEITHER Series ctor form "
+                     "compiles against its headers -- pmd_* backends compiled "
+                     "OUT. Check the probe log:")
+      message(STATUS "  ${CMAKE_BINARY_DIR}/CMakeFiles/CMakeError.log "
+                     "(or rerun cmake with --debug-trycompile)")
     endif()
   else()
     message(STATUS "pio_bench: openPMD not found -- pmd_* backends compiled OUT")
