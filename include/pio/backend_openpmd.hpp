@@ -89,8 +89,8 @@ inline ::openPMD::Series make_series(const std::filesystem::path& base,
 /// backend string and the stamped name/extension (concept requirements).
 class OpenPmdBase {
 public:
-    OpenPmdBase(MPI_Comm comm, const IoSettings& s)
-        : comm_(comm), settings_(s) {}
+    OpenPmdBase(MPI_Comm comm, const IoSettings& s, const char* backend)
+        : comm_(comm), settings_(s), backend_(backend) {}
 
     WriteSplit write(const std::filesystem::path& path, const Domain& d,
                      const Field3d<double>& field,
@@ -129,7 +129,7 @@ public:
             }
 
         auto mesh = iteration.meshes["field"];
-        mesh.setGeometry(om::Geometry::cartesian);
+        mesh.setGeometry(om::Mesh::Geometry::cartesian); // nested enum (0.17.x)
         auto rho = mesh["rho"];
         rho.resetDataset(om::Dataset(om::determineDatatype<double>(), gsz));
         rho.storeChunk(fbuf, st, lsz); // contiguous-container overload
@@ -264,7 +264,7 @@ public:
     static constexpr std::string_view extension = ""; // openPMD appends .h5
     static constexpr bool available = true;
     OpenPmdHdf5Backend(MPI_Comm comm, const IoSettings& s)
-        : OpenPmdBase(comm, s), backend_("hdf5") {}
+        : OpenPmdBase(comm, s, "hdf5") {}
 };
 
 class OpenPmdAdios2Backend : public OpenPmdBase {
@@ -273,7 +273,7 @@ public:
     static constexpr std::string_view extension = ""; // openPMD appends .bp
     static constexpr bool available = true;
     OpenPmdAdios2Backend(MPI_Comm comm, const IoSettings& s)
-        : OpenPmdBase(comm, s), backend_("adios2") {}
+        : OpenPmdBase(comm, s, "adios2") {}
 };
 
 #else // !PIO_HAVE_OPENPMD -- compile-time stubs keep the concept satisfied
