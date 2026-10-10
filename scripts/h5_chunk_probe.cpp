@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     // argv[4..] free-form: one libver name + optional "acorder"/"indep"/
     // "attrs" flags + optional "multi K M"
     std::string libver = "default";
-    bool acorder = false, indep = false, attrs = false;
+    bool acorder = false, indep = false, attrs = false, paged = false;
     int multi_k = 0;
     hsize_t multi_m = 0;
     for (int i = 4; i < argc; ++i) {
@@ -80,6 +80,7 @@ int main(int argc, char** argv) {
         if (a == "acorder") acorder = true;
         else if (a == "indep") indep = true;
         else if (a == "attrs") attrs = true;
+        else if (a == "paged") paged = true;
         else if (a == "multi" && i + 2 < argc) {
             multi_k = atoi(argv[++i]);
             multi_m = strtoull(argv[++i], nullptr, 10);
@@ -132,6 +133,13 @@ int main(int argc, char** argv) {
         H5Pset_attr_creation_order(
             fcpl, H5P_CRT_ORDER_TRACKED | H5P_CRT_ORDER_INDEXED);
 
+    if (paged) {  // openPMD's DEFAULT FCPL (ParallelHDF5IOHandlerImpl):
+        // paged file space strategy, 32 MiB pages
+        H5Pset_file_space_strategy(fcpl, H5F_FSPACE_STRATEGY_PAGE, 0,
+                                   (hsize_t)0);
+        H5Pset_file_space_page_size(fcpl, 33554432);
+    }
+
     hid_t fapl = H5Pcreate(H5P_FILE_ACCESS);
     H5Pset_fapl_mpio(fapl, MPI_COMM_WORLD, MPI_INFO_NULL);
     if (attrs) {  // openPMD's ParallelHDF5IOHandler sets BOTH by default:
@@ -178,10 +186,11 @@ int main(int argc, char** argv) {
 
     if (!rank)
         printf("[probe] file=%s global=%llu chunk=%llu libver=%s acorder=%d "
-               "xfer=%s write/rank=%.1f MiB  rc=%d  %.2f s"
+               "paged=%d xfer=%s write/rank=%.1f MiB  rc=%d  %.2f s"
                " (%.0f MiB/s aggregate)\n",
                argv[1], (unsigned long long)global, (unsigned long long)chunk,
-               libver.c_str(), (int)acorder, indep ? "INDEPENDENT" : "collective",
+               libver.c_str(), (int)acorder, (int)paged,
+               indep ? "INDEPENDENT" : "collective",
                per * 8.0 / 1048576.0, (int)rc,
                dt, global * 8.0 / 1048576.0 / (dt > 0 ? dt : 1e-9));
 
