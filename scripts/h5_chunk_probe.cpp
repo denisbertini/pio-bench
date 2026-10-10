@@ -195,6 +195,7 @@ int main(int argc, char** argv) {
     }
     const hsize_t per_k = multi_m / (hsize_t)size;
     std::vector<double> buf2(per_k, 1.0);
+    std::vector<hid_t> open_ds;
     for (int k = 0; k < multi_k; ++k) {
         char name[32];
         snprintf(name, sizeof name, "probe_%d", k);
@@ -202,6 +203,10 @@ int main(int argc, char** argv) {
                               H5Screate_simple(1, &multi_m, nullptr),
                               H5P_DEFAULT, dcpl, H5P_DEFAULT);
         if (ds < 0) h5die("multi H5Dcreate2", MPI_COMM_WORLD);
+        open_ds.push_back(ds);  // held open like openPMD until "iteration
+                                // close" -- then closed below before the
+                                // file close (an open handle at H5Fclose is
+                                // an HDF5 error, not the wall)
         if (attrs) {  // attribute on the dataset right before its data write
             hid_t at = H5Acreate2(ds, "unit_dimension", H5T_NATIVE_INT,
                                   H5Screate(H5S_SCALAR), H5P_DEFAULT,
@@ -225,8 +230,8 @@ int main(int argc, char** argv) {
         if (rc_k < 0) rc = rc_k;
         H5Sclose(memk);
         H5Sclose(fsk);
-        // keep ds open: openPMD holds datasets until iteration close
     }
+    for (hid_t ds : open_ds) H5Dclose(ds);  // "iteration close"
 
     H5Dclose(dset);
     H5Fclose(file);
