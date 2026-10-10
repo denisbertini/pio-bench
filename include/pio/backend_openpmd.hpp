@@ -7,43 +7,59 @@
 //   field      -> meshes/"field"/"rho"   float64, global extent; the HDF5
 //                 chunk layout follows the first written block (the per-rank
 //                 local subbrick), i.e. the production write pattern.
-//   particles  -> particles/"electrons"  standard SoA records:
+//   particles  -> particles/"electrons"  standard SoA species:
 //                 position(x,y,z), momentum(x,y,z), mass, id(uint64)
 //                 -- the AoS->SoA transpose is exactly the packing that
 //                 production openPMD writers pay; it is timed INSIDE the
 //                 particle window (same philosophy as the hdf5 prepack).
 //
-// Timing honesty: openPMD store*() calls are LAZY -- bytes move at flush.
-// The phase split therefore uses two incremental flushes within one
-// iteration (supported by both the HDF5 and the ADIOS2/BP engines):
-//   [pack+store field  | flush] = field_seconds
-//   [pack+store parts  | flush] = particle_seconds
-//   iteration.close()            (metadata only, outside both windows)
-// The wall total in benchmark.hpp additionally covers Series create/close,
-// so --fitness app never under-reports the openPMD bookkeeping.
+// CANONICAL IMPLEMENTATION: the write path mirrors openPMD's own parallel
+// benchmark example (examples/8a_benchmark_write_parallel.cpp) and the
+// particle example (examples/3b_write_resizable_particles.cpp) at the exact
+// 0.17.1 tag, call for call:
+//   * OWNING buffers: every storeChunk() uses the shared_ptr overload -- the
+//     createData() pattern of example 8a.  openPMD holds the buffer until
+//     the flush consumes it, so a dangling-buffer flush is impossible BY
+//     CONSTRUCTION.  (The zero-copy container overload storeChunk(vec&, ...)
+//     keeps only a raw pointer -- fine while buffers outlive the flush, but
+//     it is the classic openPMD user foot-gun and buys nothing here.)
+//   * SCALAR particle records are written DIRECTLY ON THE RECORD:
+//     currSpecies["id"].resetDataset(ds); currSpecies["id"].storeChunk(...)
+//     This works because 0.17's BaseRecord<T> inherits BOTH
+//     Container<T> AND T itself ("if the record is a scalar record, it
+//     directly acts as a record component" -- BaseRecord.hpp, 0.17.1).
+//     The previous implementation reached mass/id through a separate
+//     RecordComponent(Record) view object -- a real-library capability,
+//     but NOT the canonical path, and the only non-canonical API in the
+//     write path (it is retired here).
+//   * positionOffset(x,y,z) are STANDARD species records (openPMD particle
+//     spec); like examples 8a/3b they are makeConstant(0.0) -- metadata,
+//     zero data bytes.
+//   * Flush discipline: the canonical write is ONE flush at
+//     iteration.close() ("The iteration's content will be flushed
+//     automatically" -- example 3b).  That is the DEFAULT.  --pmd-split
+//     opts into two incremental flushes for an honest field/particle phase
+//     split:  [pack+store field | flush] = field_seconds
+//              [pack+store parts | flush] = particle_seconds
+//              iteration.close() (metadata only)
+//     With the split off, both phases report 0 and the wall total in
+//     benchmark.hpp remains exact.
 //
 // API contract: written against openPMD 0.17.x (verified against the exact
 // tag sources of 0.17.1): Series(path, access, comm, options-JSON) with the
 // backend selected via {"backend":"hdf5"|"adios2"}; Access::CREATE /
-// READ_ONLY; determineDatatype<T>(); Offset/Extent (no Shape); raw-buffer
-// I/O via the contiguous-container storeChunk(vector&, ...) and
-// loadChunkRaw(T*, ...); scalar particle records reached through the
-// RecordComponent(BaseRecord<RecordComponent>) slicing-safe view ctor.  //
-// (0.17.1 fact: particle DATA records are plain Record; PatchRecord is
-//  patch metadata only.)
-//
-// HARD LIFETIME RULE: storeChunk(container, ...) is zero-copy NON-OWNING --
-// openPMD reads the container at FLUSH time.  Every buffer passed to
-// storeChunk MUST outlive the flush that consumes it; violating this reads
-// dangling memory at flush (EFAULT/MPI_ERR_IO for freed mmaps at multi-MiB
-// sizes, silent garbage for small heap allocations).  field fbuf and the
-// particle cols/ids are function-scope for exactly this reason.
+// READ_ONLY; determineDatatype<T>(); Offset/Extent; storeChunk via
+// std::shared_ptr overloads (shared_ptr<T> and shared_ptr<T[]>); raw-buffer
+// reads via loadChunkRaw(T*, ...) (the buffer must stay alive until flush;
+// read buffers below are function-scope); scalar records used as components
+// directly on the Record (BaseRecord<T> : Container<T>, T).
 #pragma once
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -87,7 +103,8 @@ inline void dbg_flush(const char* phase) {
 }
 
 /// Standard-name member table: AoS member -> (record, component).
-/// Scalar records carry comp == nullptr (the record IS the dataset).
+/// Scalar records carry comp == nullptr: BaseRecord IS-A RecordComponent,
+/// so they are written directly on the Record (example 8a: currSpecies["id"]).
 struct SoaMember {
     const char* record;
     const char* comp;
@@ -157,24 +174,27 @@ public:
         Stopwatch w;
         // Interior gather out of the ghost halo: contiguous staging buffer
         // (openPMD has no strided-memory store -- the same copy production
-        // openPMD writers make; timed on purpose).
+        // openPMD writers make; timed on purpose).  OWNING shared buffer,
+        // canonical createData()/storeChunk(shared_ptr) pattern: ownership
+        // transfers to openPMD, the bytes cannot dangle at flush.
         const std::size_t lx = d.local[0], ly = d.local[1], lz = d.local[2];
         const std::size_t py = d.padded[1], pz = d.padded[2];
-        std::vector<double> fbuf(lx * ly * lz);
+        std::shared_ptr<double[]> fbuf(new double[lx * ly * lz]);
         for (std::size_t i = 0; i < lx; ++i)
             for (std::size_t j = 0; j < ly; ++j) {
                 const double* src =
                     field.data() +
                     ((i + d.ghost) * py + (j + d.ghost)) * pz + d.ghost;
-                std::memcpy(&fbuf[(i * ly + j) * lz], src, lz * sizeof(double));
+                std::memcpy(&fbuf[i * ly * lz + j * lz], src,
+                            lz * sizeof(double));
             }
 
         auto mesh = iteration.meshes["field"];
         mesh.setGeometry(om::Mesh::Geometry::cartesian); // nested enum (0.17.x)
         auto rho = mesh["rho"];
         rho.resetDataset(om::Dataset(om::determineDatatype<double>(), gsz));
-        rho.storeChunk(fbuf, st, lsz); // contiguous-container overload
-        openpmd_detail::dbg_store("field/rho", st, lsz, fbuf.data());
+        rho.storeChunk(fbuf, st, lsz); // shared_ptr overload: owning
+        openpmd_detail::dbg_store("field/rho", st, lsz, fbuf.get());
         if (settings_.pmd_split) {
             openpmd_detail::dbg_flush("1/2: field");
             series.flush();
@@ -182,9 +202,6 @@ public:
         }
 
         // ---- particles: standard SoA species ------------------------------
-        // Species records: [record][comp] is the data component; SCALAR
-        // records (mass, id) are reached as component views via the
-        // slicing-safe RecordComponent(BaseRecord) ctor.
         w.restart();
         const std::size_t n = parts.local_count();
         if (n > 0) {
@@ -194,70 +211,70 @@ public:
             const om::Extent lcount{n};
             const Particle* p = parts.data();
 
-            // LIFETIME RULE: openPMD's contiguous-container storeChunk() is
-            // zero-copy and NON-OWNING -- it keeps a raw pointer into the
-            // caller's container and dereferences it at flush().  Buffers
-            // freed before the flush become dangling reads; at multi-MiB
-            // sizes glibc hands those mmap regions back to the kernel, so
-            // the flush reads UNMAPPED memory -> EFAULT -> MPI_ERR_IO at
-            // MPI_File_write_at (crash at position/x on every rank).  All
-            // columns therefore live here, in function scope, until after
-            // the final flush below.  (A small n hides the fault and shows
-            // garbage instead: --verify catches that half.)
             constexpr std::size_t ncol =
                 std::size(openpmd_detail::members);
-            std::vector<std::vector<double>> cols(ncol,
-                                                  std::vector<double>(n));
-            std::vector<std::uint64_t> ids(n);
-
             for (std::size_t c = 0; c < ncol; ++c) {
                 const auto& m = openpmd_detail::members[c];
-                double* col = cols[c].data();
+                // Column packed straight into an OWNING buffer; storeChunk()
+                // hands it to openPMD, which keeps it alive until the flush.
+                std::shared_ptr<double[]> col(new double[n]);
+                double* raw = col.get();
                 for (std::size_t k = 0; k < n; ++k)
                     col[k] = p[k].*(m.dm);
-                auto rec = species[m.record];
+
                 if (m.comp) {
-                    auto comp = rec[m.comp];
-                    comp.resetDataset(
-                        om::Dataset(om::determineDatatype<double>(), gcount));
-                    comp.storeChunk(cols[c], roff, lcount);
-                    openpmd_detail::dbg_store(
-                        (std::string(m.record) + "/" + m.comp).c_str(), roff,
-                        lcount, cols[c].data());
+                    auto comp = species[m.record][m.comp];
+                    comp.resetDataset(om::Dataset(
+                        om::determineDatatype<double>(), gcount));
+                    comp.storeChunk(std::move(col), roff, lcount);
                 } else {
-                    om::RecordComponent comp(rec);
-                    comp.resetDataset(
-                        om::Dataset(om::determineDatatype<double>(), gcount));
-                    comp.storeChunk(cols[c], roff, lcount);
-                    openpmd_detail::dbg_store(
-                        (std::string(m.record) + " [scalar-view]").c_str(),
-                        roff, lcount, cols[c].data());
+                    // Canonical scalar record (example 8a): BaseRecord
+                    // inherits RecordComponent itself, so the Record IS the
+                    // dataset -- reset/store directly, no detached view.
+                    auto rec = species[m.record];
+                    rec.resetDataset(om::Dataset(
+                        om::determineDatatype<double>(), gcount));
+                    rec.storeChunk(std::move(col), roff, lcount);
                 }
+                openpmd_detail::dbg_store(
+                    (std::string(m.record) + (m.comp ? "/" : "") +
+                     (m.comp ? m.comp : " [scalar]"))
+                        .c_str(),
+                    roff, lcount, raw);
             }
             // id: the standard unsigned-64 particle id record (scalar).
+            std::shared_ptr<std::uint64_t[]> ids(new std::uint64_t[n]);
+            std::uint64_t* raw_ids = ids.get();
             for (std::size_t k = 0; k < n; ++k)
                 ids[k] = p[k].id;
-            om::RecordComponent idrec(species["id"]);
+            auto idrec = species["id"];
             idrec.resetDataset(
                 om::Dataset(om::determineDatatype<std::uint64_t>(), gcount));
-            idrec.storeChunk(ids, roff, lcount);
-            openpmd_detail::dbg_store("id [scalar-view]", roff, lcount,
-                                      ids.data());
+            idrec.storeChunk(std::move(ids), roff, lcount);
+            openpmd_detail::dbg_store("id [scalar]", roff, lcount, raw_ids);
+
+            // positionOffset: standard-mandated species records (openPMD
+            // particle spec).  Examples 8a/3b: resetDataset + makeConstant
+            // -- pure metadata, zero data bytes on disk.
+            static constexpr const char* poff_comp[3] = {"x", "y", "z"};
+            for (const char* cc : poff_comp) {
+                auto po = species["positionOffset"][cc];
+                po.resetDataset(
+                    om::Dataset(om::determineDatatype<double>(), gcount));
+                po.makeConstant(0.0);
+            }
         }
         if (settings_.pmd_split) {
             openpmd_detail::dbg_flush("2/2: particles");
             series.flush();
             split.particle_seconds = w.elapsed();
-        } else {
-            // single-flush diagnostic mode: ONE flush per checkpoint; the
-            // phase split is honestly reported as unavailable (zeros) --
-            // the wall total in benchmark.hpp remains exact. Used to
-            // bisect whether the incremental-flush pattern itself is the
-            // pmd_* crash trigger.
-            series.flush();
         }
 
-        iteration.close(); // metadata finalization, outside both windows
+        // Canonical finalization (examples 3b/8a): closing the iteration
+        // flushes everything it still holds -- in the default mode this is
+        // THE flush point.  With --pmd-split the bytes are already down and
+        // this is metadata only.
+        iteration.close();
         return split;
     }
 
@@ -305,21 +322,23 @@ public:
         const om::Offset roff{src.rank_offset()};
         const om::Extent lcount{n};
 
+        // loadChunkRaw is the raw counterpart of storeChunk: the caller's
+        // buffer must outlive the flush -- cols/ids are function-scope.
         std::vector<std::vector<double>> cols;
         cols.reserve(std::size(openpmd_detail::members));
         for (const auto& m : openpmd_detail::members) {
             cols.emplace_back(n);
-            auto rec = species[m.record];
             if (m.comp) {
-                auto comp = rec[m.comp];
+                auto comp = species[m.record][m.comp];
                 comp.loadChunkRaw(cols.back().data(), roff, lcount);
             } else {
-                om::RecordComponent comp(rec);
-                comp.loadChunkRaw(cols.back().data(), roff, lcount);
+                // scalar record: the Record IS the component (see write).
+                auto rec = species[m.record];
+                rec.loadChunkRaw(cols.back().data(), roff, lcount);
             }
         }
         std::vector<std::uint64_t> ids(n);
-        om::RecordComponent idrec(species["id"]);
+        auto idrec = species["id"];
         idrec.loadChunkRaw(ids.data(), roff, lcount);
         series.flush();
 

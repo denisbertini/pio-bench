@@ -4,8 +4,17 @@
 // of that surface locally, without the real library. When the cluster
 // compiler accepts the real headers, that remains the final gate; this stub
 // only stops us from shipping plain C++ errors.
+//
+// 0.17.1 facts mirrored here:
+//   * BaseRecord<T> inherits BOTH Container<T> AND T: a scalar record is
+//     used directly as a RecordComponent (resetDataset/storeChunk on the
+//     Record object -- example 8a: currSpecies["id"]).
+//   * storeChunk owning overloads: shared_ptr<T> and shared_ptr<T[]>
+//     (canonical createData() pattern), plus the non-owning container one.
+//   * makeConstant() on RecordComponent (positionOffset pattern, 8a/3b).
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include <mpi.h>
@@ -27,13 +36,16 @@ struct Dataset {
 };
 
 struct RecordComponent {
-    struct FromRecord {};
-    template <typename BaseRecordT>
-    RecordComponent(BaseRecordT const&) {}
     RecordComponent() {}
     void resetDataset(Dataset) {}
+    template <typename T>
+    void storeChunk(std::shared_ptr<T>, Offset, Extent) {}
+    template <typename T>
+    void storeChunk(std::shared_ptr<T[]>, Offset, Extent) {}
     template <typename Container>
     void storeChunk(Container&, Offset, Extent) {}
+    template <typename T>
+    void makeConstant(T) {}
     template <typename T>
     void loadChunkRaw(T*, Offset, Extent) {}
 };
@@ -43,9 +55,14 @@ struct MeshRecordComponent : RecordComponent {
 };
 
 template <typename ComponentT>
-struct BaseRecord {
+struct ContainerLike {
     ComponentT operator[](const std::string&) { return ComponentT{}; }
+    ComponentT operator[](int) { return ComponentT{}; }  // iterations: int-key
 };
+
+// The real 0.17.1 BaseRecord<T> is `: public Container<T>, public T`.
+template <typename ComponentT>
+struct BaseRecord : ContainerLike<ComponentT>, ComponentT {};
 
 struct Mesh : BaseRecord<MeshRecordComponent> {
     enum class Geometry { cartesian, thetaMode, cylindrical, spherical, other };
@@ -54,22 +71,16 @@ struct Mesh : BaseRecord<MeshRecordComponent> {
 
 struct Record : BaseRecord<RecordComponent> {};
 
-template <typename RecordT>
-struct Container {
-    RecordT operator[](const std::string&) { return RecordT{}; }
-    RecordT operator[](int) { return RecordT{}; }  // iterations: int-indexed
-};
-
-struct Species : Container<Record> {};
+struct Species : ContainerLike<Record> {};
 
 struct Iteration {
-    Container<Mesh> meshes;
-    Container<Species> particles;
+    ContainerLike<Mesh> meshes;
+    ContainerLike<Species> particles;
     void close() {}
 };
 
 struct Series {
-    Container<Iteration> iterations;
+    ContainerLike<Iteration> iterations;
     Series(const std::string&, Access, MPI_Comm, const std::string& = "{}") {}
     Series(const std::string&, Access, const std::string& = "{}") {}
     void flush(std::string = "{}") {}

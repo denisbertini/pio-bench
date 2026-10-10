@@ -127,9 +127,10 @@ struct BenchConfig {
     bool h5_prepack{true};                     // hdf5: contiguous staging writes
                                                // (false = in-library strided)
     bool adi_stats{true};                      // adios2: BP5 per-block statistics
-    bool pmd_split{true};                      // pmd_*: incremental-flush phase split
-                                               // (false = StatsLevel=0, skip the
-                                               //  min/max/sum pass over all data)
+    bool pmd_split{false};                     // pmd_*: two incremental flushes ->
+                                               // phase split; default off = the
+                                               // canonical single flush at
+                                               // iteration.close() (openPMD examples)
 
     // ---- time loop ------------------------------------------------------------
     int steps{10};
@@ -161,9 +162,10 @@ struct BenchConfig {
         "                         (default: pre-packed contiguous writes)\n"
         "  --no-adi-stats         adios2: BP5 StatsLevel=0 (skip per-block\n"
         "                         min/max/sum statistics of every written block)\n"
-        "  --pmd-single-flush     pmd_*: ONE flush per checkpoint (phase split\n"
-        "                         reported as 0; crash bisection of the\n"
-        "                         incremental-flush pattern)\n"
+        "  --pmd-split            pmd_*: two incremental flushes to split\n"
+        "                         field/particle seconds (default off = the\n"
+        "                         canonical single flush at iteration.close(),\n"
+        "                         phase split reported as 0)\n"
         "  --steps N              timesteps                       (10)\n"
         "  --interval N           checkpoint every N steps        (1)\n"
         "  --max-checkpoints N    cap checkpoints, -1 unlimited   (-1)\n"
@@ -239,8 +241,10 @@ struct BenchConfig {
                 cfg.h5_prepack = false;
             } else if (key == "no-adi-stats") {
                 cfg.adi_stats = false;
+            } else if (key == "pmd-split") {
+                cfg.pmd_split = true;
             } else if (key == "pmd-single-flush") {
-                cfg.pmd_split = false;
+                cfg.pmd_split = false; // legacy alias: now the default
             } else if (key == "steps") {
                 cfg.steps = static_cast<int>(detail::parse_ll(need_value(i, key), key));
             } else if (key == "interval") {

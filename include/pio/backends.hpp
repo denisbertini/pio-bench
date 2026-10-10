@@ -33,9 +33,9 @@ struct IoSettings {
     bool collective_buffering{true};
     bool h5_prepack{true};  // hdf5: gather members before H5Dwrite (cf. --h5-strided)
     bool adi_stats{true};   // adios2: BP5 per-block stats (cf. --no-adi-stats)
-    bool pmd_split{true};   // pmd_*: two incremental flushes -> real phase split
-                            // (false = single flush, split reported as 0; cf.
-                            // --pmd-single-flush crash bisection)
+    bool pmd_split{false};  // pmd_*: two incremental flushes -> real phase split
+                            // (default: canonical single flush at
+                            // iteration.close(), cf. --pmd-split)
 
     static IoSettings from(const BenchConfig& c) {
         return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
