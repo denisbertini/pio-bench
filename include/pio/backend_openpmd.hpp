@@ -130,8 +130,16 @@ inline ::openPMD::Series make_series(const std::filesystem::path& base,
     // an extension-less name works via the backend JSON but makes ADIOS2
     // emit one "No file ending specified" warning per rank per Series --
     // and leaves the on-disk name implicit. Explicit is quieter and clearer.
+    //
+    // ADIOS2 runs file-based iteration encoding (see write()), which the
+    // API requires to carry the %T iteration-expansion pattern in the
+    // name: "<base>%T.bp".  %T expands to the iteration index (always 0
+    // here -- one iteration per Series), so the on-disk series directory
+    // keeps the checkpoint name intact.  The read side passes the same
+    // pattern; openPMD scans it and resolves the existing iterations.
+    const bool adios2 = std::string_view(backend) == "adios2";
     const std::string name =
-        base.string() + (std::string_view(backend) == "adios2" ? ".bp" : ".h5");
+        base.string() + (adios2 ? "%T.bp" : ".h5");
 #ifdef PIO_PMD_LEGACY_CTOR
     const std::string engine =
         std::string_view(backend) == "adios2" ? "BP5" : "HDF5";
