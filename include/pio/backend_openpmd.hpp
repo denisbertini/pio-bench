@@ -4,10 +4,9 @@
 // Why this backend exists: openPMD-api is the de-facto checkpoint layer of
 // the PIC/exa-scale world (PIConGPU, WarpX, PiCoMo...). It re-expresses the
 // same payload as the raw backends but through the STANDARD data model:
-//   field      -> meshes/"field"/"rho"   float64, global extent,
-//                 chunk = per-rank local block (the production pattern:
-//                 without explicit chunks, HDF5 defaults to whole-dataset
-//                 chunks and multi-rank writes serialize).
+//   field      -> meshes/"field"/"rho"   float64, global extent; the HDF5
+//                 chunk layout follows the first written block (the per-rank
+//                 local subbrick), i.e. the production write pattern.
 //   particles  -> particles/"electrons"  standard SoA records:
 //                 position(x,y,z), momentum(x,y,z), mass, id(uint64)
 //                 -- the AoS->SoA transpose is exactly the packing that
@@ -23,17 +22,17 @@
 // The wall total in benchmark.hpp additionally covers Series create/close,
 // so --fitness app never under-reports the openPMD bookkeeping.
 //
-// Hint pass-through: openPMD engines take JSON options, not MPI_Info. The
-// harness actuation channel for this backend is openPMD's own option layer
-// (Series::setOptions); wiring an env channel through it needs the exact
-// option schema of the image's openPMD version -- deliberate follow-up,
-// NOT silently guessed here. Until then these backends measure openPMD's
-// automatic choices, bit-exactly verified like every other backend.
+// API contract: written against openPMD 0.17.x (verified against the exact
+// tag sources of 0.17.1): Series(path, access, comm, options-JSON) with the
+// backend selected via {"backend":"hdf5"|"adios2"}; Access::CREATE /
+// READ_ONLY; determineDatatype<T>(); Offset/Extent (no Shape); raw-buffer
+// I/O via the contiguous-container storeChunk(vector&, ...) and
+// loadChunkRaw(T*, ...); scalar particle records reached through the
+// PatchRecordComponent(BaseRecord<...>) slicing-safe view ctor.
 #pragma once
 
 #include <cstdint>
 #include <cstring>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -66,9 +65,9 @@ inline constexpr SoaMember members[] = {
 
 /// openPMD appends the engine suffix (.h5/.bp) when the base has none --
 /// write and read must pass the identical base + backend to resolve it.
-/// Current API (openPMD >= 0.15 / dev): backend chosen by JSON options,
-/// ctor is Series(path, access, comm, options). The CMake probe picks the
-/// ctor form; PIO_PMD_LEGACY_CTOR selects the old positional-engine one.
+/// 0.17.x ctor: (path, access, comm, options), backend via JSON. The CMake
+/// probe picks the ctor form; PIO_PMD_LEGACY_CTOR = pre-0.17 positional
+/// engine-string form.
 inline ::openPMD::Series make_series(const std::filesystem::path& base,
                                      const char* backend,
                                      ::openPMD::Access at, MPI_Comm comm) {
@@ -85,7 +84,7 @@ inline ::openPMD::Series make_series(const std::filesystem::path& base,
 } // namespace openpmd_detail
 
 /// Shared implementation; the two concrete backends differ only in the
-/// engine string and the stamped name/extension (concept requirements).
+/// backend string and the stamped name/extension (concept requirements).
 class OpenPmdBase {
 public:
     OpenPmdBase(MPI_Comm comm, const IoSettings& s)
@@ -98,14 +97,20 @@ public:
         WriteSplit split;
 
         om::Series series = openpmd_detail::make_series(
-            path, backend_, om::Access::Create, comm_);
+            path, backend_, om::Access::CREATE, comm_);
         auto iteration = series.iterations[0];
 
-        const om::Shape gsz{d.global[0], d.global[1], d.global[2]};
-        const om::Offset st{d.start[0], d.start[1], d.start[2]};
-        const om::Shape lsz{d.local[0], d.local[1], d.local[2]};
+        const om::Extent gsz{static_cast<std::uint64_t>(d.global[0]),
+                             static_cast<std::uint64_t>(d.global[1]),
+                             static_cast<std::uint64_t>(d.global[2])};
+        const om::Offset st{static_cast<std::uint64_t>(d.start[0]),
+                            static_cast<std::uint64_t>(d.start[1]),
+                            static_cast<std::uint64_t>(d.start[2])};
+        const om::Extent lsz{static_cast<std::uint64_t>(d.local[0]),
+                             static_cast<std::uint64_t>(d.local[1]),
+                             static_cast<std::uint64_t>(d.local[2])};
 
-        // ---- fields: standard mesh record, chunk = local block ----------
+        // ---- fields: standard mesh record --------------------------------
         Stopwatch w;
         // Interior gather out of the ghost halo: contiguous staging buffer
         // (openPMD has no strided-memory store -- the same copy production
@@ -124,24 +129,22 @@ public:
         auto mesh = iteration.meshes["field"];
         mesh.setGeometry(om::Geometry::cartesian);
         auto rho = mesh["rho"];
-        rho.resetDataset(om::Dataset(om::determineType<double>(), gsz));
-        rho.setChunkSize(lsz);
-        rho.storeChunk(fbuf.data(), st, lsz);
+        rho.resetDataset(om::Dataset(om::determineDatatype<double>(), gsz));
+        rho.storeChunk(fbuf, st, lsz); // contiguous-container overload
         series.flush();
         split.field_seconds = w.elapsed();
 
-        // ---- particles: standard SoA species -----------------------------
-        // Type-safe traversal: species[record] is a PatchRecord (writable
-        // directly for SCALAR records like mass/id); [record][comp] is the
-        // PatchRecordComponent leaf. Generic lambda covers both shapes
-        // without naming the (version-sensitive) classes.
+        // ---- particles: standard SoA species ------------------------------
+        // Species records: [record][comp] is the data component; SCALAR
+        // records (mass, id) are reached as component views via the
+        // slicing-safe PatchRecordComponent(BaseRecord) ctor.
         w.restart();
         const std::size_t n = parts.local_count();
         if (n > 0) {
             auto species = iteration.particles["electrons"];
-            const om::Shape gcount{parts.global_count()};
+            const om::Extent gcount{parts.global_count()};
             const om::Offset roff{parts.rank_offset()};
-            const om::Shape lcount{n};
+            const om::Extent lcount{n};
             const Particle* p = parts.data();
 
             for (const auto& m : openpmd_detail::members) {
@@ -150,27 +153,25 @@ public:
                     col[k] = p[k].*(m.dm);
                 auto rec = species[m.record];
                 if (m.comp) {
-                    auto ds = rec[m.comp];
-                    ds.resetDataset(
-                        om::Dataset(om::determineType<double>(), gcount));
-                    ds.setChunkSize(lcount);
-                    ds.storeChunk(col.data(), roff, lcount);
+                    auto comp = rec[m.comp];
+                    comp.resetDataset(
+                        om::Dataset(om::determineDatatype<double>(), gcount));
+                    comp.storeChunk(col, roff, lcount);
                 } else {
-                    rec.resetDataset(
-                        om::Dataset(om::determineType<double>(), gcount));
-                    rec.setChunkSize(lcount);
-                    rec.storeChunk(col.data(), roff, lcount);
+                    om::PatchRecordComponent comp(rec);
+                    comp.resetDataset(
+                        om::Dataset(om::determineDatatype<double>(), gcount));
+                    comp.storeChunk(col, roff, lcount);
                 }
             }
             // id: the standard unsigned-64 particle id record (scalar).
             std::vector<std::uint64_t> ids(n);
             for (std::size_t k = 0; k < n; ++k)
                 ids[k] = p[k].id;
-            auto idrec = species["id"];
+            om::PatchRecordComponent idrec(species["id"]);
             idrec.resetDataset(
-                om::Dataset(om::determineType<std::uint64_t>(), gcount));
-            idrec.setChunkSize(lcount);
-            idrec.storeChunk(ids.data(), roff, lcount);
+                om::Dataset(om::determineDatatype<std::uint64_t>(), gcount));
+            idrec.storeChunk(ids, roff, lcount);
         }
         series.flush();
         split.particle_seconds = w.elapsed();
@@ -183,15 +184,19 @@ public:
                     Field3d<double>& dst) const {
         namespace om = ::openPMD;
         om::Series series = openpmd_detail::make_series(
-            path, backend_, om::Access::Read, comm_);
+            path, backend_, om::Access::READ_ONLY, comm_);
         auto iteration = series.iterations[0];
         auto rho = iteration.meshes["field"]["rho"];
 
-        const om::Offset st{d.start[0], d.start[1], d.start[2]};
-        const om::Shape lsz{d.local[0], d.local[1], d.local[2]};
+        const om::Offset st{static_cast<std::uint64_t>(d.start[0]),
+                            static_cast<std::uint64_t>(d.start[1]),
+                            static_cast<std::uint64_t>(d.start[2])};
+        const om::Extent lsz{static_cast<std::uint64_t>(d.local[0]),
+                             static_cast<std::uint64_t>(d.local[1]),
+                             static_cast<std::uint64_t>(d.local[2])};
         const std::size_t lx = d.local[0], ly = d.local[1], lz = d.local[2];
         std::vector<double> fbuf(lx * ly * lz);
-        rho.loadChunk(fbuf.data(), st, lsz);
+        rho.loadChunkRaw(fbuf.data(), st, lsz);
         series.flush(); // bytes now owned by fbuf
 
         const std::size_t py = d.padded[1], pz = d.padded[2];
@@ -212,32 +217,36 @@ public:
             return;
 
         om::Series series = openpmd_detail::make_series(
-            path, backend_, om::Access::Read, comm_);
+            path, backend_, om::Access::READ_ONLY, comm_);
         auto iteration = series.iterations[0];
         auto species = iteration.particles["electrons"];
 
         const om::Offset roff{src.rank_offset()};
-        const om::Shape lcount{n};
+        const om::Extent lcount{n};
 
-        std::vector<std::shared_ptr<const double>> cols;
+        std::vector<std::vector<double>> cols;
         cols.reserve(std::size(openpmd_detail::members));
         for (const auto& m : openpmd_detail::members) {
+            cols.emplace_back(n);
             auto rec = species[m.record];
             if (m.comp) {
-                auto ds = rec[m.comp];
-                cols.push_back(ds.loadChunk<double>(roff, lcount));
+                auto comp = rec[m.comp];
+                comp.loadChunkRaw(cols.back().data(), roff, lcount);
             } else {
-                cols.push_back(rec.loadChunk<double>(roff, lcount));
+                om::PatchRecordComponent comp(rec);
+                comp.loadChunkRaw(cols.back().data(), roff, lcount);
             }
         }
-        auto ids = species["id"].loadChunk<std::uint64_t>(roff, lcount);
+        std::vector<std::uint64_t> ids(n);
+        om::PatchRecordComponent idrec(species["id"]);
+        idrec.loadChunkRaw(ids.data(), roff, lcount);
         series.flush();
 
         for (std::size_t k = 0; k < n; ++k) {
             Particle& p = out[k];
             for (std::size_t c = 0; c < std::size(openpmd_detail::members); ++c)
-                p.*(openpmd_detail::members[c].dm) = cols[c].get()[k];
-            p.id = ids.get()[k];
+                p.*(openpmd_detail::members[c].dm) = cols[c][k];
+            p.id = ids[k];
         }
     }
 

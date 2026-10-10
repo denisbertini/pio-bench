@@ -156,22 +156,26 @@ if(PIO_WITH_OPENPMD)
     set(PIO_PMD_PROBE "
 #include <openPMD/openPMD.hpp>
 #include <mpi.h>
+#include <vector>
 int main() {
-  openPMD::Series s(\"probe_only_unused.h5\", openPMD::Access::Create,
+  openPMD::Series s(\"probe_only_unused.h5\", openPMD::Access::CREATE,
                     MPI_COMM_WORLD);
   auto it = s.iterations[0];
-  double buf[2] = {1.0, 2.0};
+  std::vector<double> buf(2, 1.0);
   auto comp = it.meshes[\"m\"][\"c\"];
-  comp.resetDataset(openPMD::Dataset(openPMD::determineType<double>(),
-                                     openPMD::Shape{2}));
-  comp.setChunkSize(openPMD::Shape{1});
+  comp.resetDataset(openPMD::Dataset(openPMD::determineDatatype<double>(),
+                                     openPMD::Extent{2}));
   comp.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
-  auto scalar = it.particles[\"sp\"][\"mass\"];      // scalar record
-  scalar.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
+  auto scalar = it.particles[\"sp\"][\"mass\"];       // scalar record
+  openPMD::PatchRecordComponent sc(scalar);          // slicing-safe view
+  sc.resetDataset(openPMD::Dataset(openPMD::determineDatatype<double>(),
+                                   openPMD::Extent{2}));
+  sc.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
   auto px = it.particles[\"sp\"][\"position\"][\"x\"]; // component leaf
+  px.resetDataset(openPMD::Dataset(openPMD::determineDatatype<double>(),
+                                   openPMD::Extent{2}));
   px.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
-  (void)px.loadChunk<double>(openPMD::Offset{0}, openPMD::Extent{2});
-  (void)comp.loadChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
+  px.loadChunkRaw(buf.data(), openPMD::Offset{0}, openPMD::Extent{2});
   s.flush();
   return 0;
 }")
