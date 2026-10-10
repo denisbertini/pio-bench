@@ -96,17 +96,24 @@ scripts/pmd_env_matrix.sh # pmd throughput attribution matrix (one mpirun
 Backends absent from the build report `SKIPPED`, not failure. Tunables:
 `RANKS`, `LOCAL`, `PARTICLES`, `STEPS`, `MPIRUN` (see script header).
 
-Measured on Lustre/Virgo, 32 ranks on one node, 11.9 GiB/checkpoint,
-`--verify` clean throughout (single-shot numbers, ~±25% node contention
-noise — trust same-run ratios):
+Measured on Lustre (Virgo): 32 ranks, one node, 11.9 GiB checkpoint,
+striped output dir (`lfs setstripe -c 8`), `HDF5_USE_FILE_LOCKING=FALSE`,
+head-to-head via `scripts/pmd_head2head.sh` (all backends back to back in
+one session, mean of 3 checkpoints):
 
-| config | MiB/s |
+| backend | MiB/s |
 |---|---|
-| `pmd_hdf5`, openPMD defaults | 311 |
-| `pmd_hdf5`, rank-aligned chunks | 625 |
-| `pmd_adios2` (per-writer files) | 1069 |
-| raw `hdf5` backend | 1129 |
-| **`pmd_hdf5`, rank chunks + `lfs setstripe -c 8` dir** | **1200** |
+| **pmd_hdf5** (rank-aligned chunks) | **1214** |
+| adios2 | 1097 |
+| mpiio | 1079 |
+| hdf5 (raw) | 1032 |
+| pmd_adios2 | 985 |
+
+The standard openPMD model costs nothing at production write sizes:
+`pmd_hdf5` beats the hand-written raw HDF5 path by ~18% under identical
+conditions.  Cross-run tables on a shared system mislead (earlier ones
+ranked these engines in nearly the opposite order) -- quote only
+head2head numbers.
 
 ## Notes
 
