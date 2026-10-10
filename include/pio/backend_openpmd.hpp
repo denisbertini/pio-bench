@@ -31,6 +31,13 @@
 // RecordComponent(BaseRecord<RecordComponent>) slicing-safe view ctor.  //
 // (0.17.1 fact: particle DATA records are plain Record; PatchRecord is
 //  patch metadata only.)
+//
+// HARD LIFETIME RULE: storeChunk(container, ...) is zero-copy NON-OWNING --
+// openPMD reads the container at FLUSH time.  Every buffer passed to
+// storeChunk MUST outlive the flush that consumes it; violating this reads
+// dangling memory at flush (EFAULT/MPI_ERR_IO for freed mmaps at multi-MiB
+// sizes, silent garbage for small heap allocations).  field fbuf and the
+// particle cols/ids are function-scope for exactly this reason.
 #pragma once
 
 #include <cstdint>
@@ -157,8 +164,25 @@ public:
             const om::Extent lcount{n};
             const Particle* p = parts.data();
 
-            for (const auto& m : openpmd_detail::members) {
-                std::vector<double> col(n);
+            // LIFETIME RULE: openPMD's contiguous-container storeChunk() is
+            // zero-copy and NON-OWNING -- it keeps a raw pointer into the
+            // caller's container and dereferences it at flush().  Buffers
+            // freed before the flush become dangling reads; at multi-MiB
+            // sizes glibc hands those mmap regions back to the kernel, so
+            // the flush reads UNMAPPED memory -> EFAULT -> MPI_ERR_IO at
+            // MPI_File_write_at (crash at position/x on every rank).  All
+            // columns therefore live here, in function scope, until after
+            // the final flush below.  (A small n hides the fault and shows
+            // garbage instead: --verify catches that half.)
+            constexpr std::size_t ncol =
+                std::size(openpmd_detail::members);
+            std::vector<std::vector<double>> cols(ncol,
+                                                  std::vector<double>(n));
+            std::vector<std::uint64_t> ids(n);
+
+            for (std::size_t c = 0; c < ncol; ++c) {
+                const auto& m = openpmd_detail::members[c];
+                double* col = cols[c].data();
                 for (std::size_t k = 0; k < n; ++k)
                     col[k] = p[k].*(m.dm);
                 auto rec = species[m.record];
@@ -166,16 +190,15 @@ public:
                     auto comp = rec[m.comp];
                     comp.resetDataset(
                         om::Dataset(om::determineDatatype<double>(), gcount));
-                    comp.storeChunk(col, roff, lcount);
+                    comp.storeChunk(cols[c], roff, lcount);
                 } else {
                     om::RecordComponent comp(rec);
                     comp.resetDataset(
                         om::Dataset(om::determineDatatype<double>(), gcount));
-                    comp.storeChunk(col, roff, lcount);
+                    comp.storeChunk(cols[c], roff, lcount);
                 }
             }
             // id: the standard unsigned-64 particle id record (scalar).
-            std::vector<std::uint64_t> ids(n);
             for (std::size_t k = 0; k < n; ++k)
                 ids[k] = p[k].id;
             om::RecordComponent idrec(species["id"]);
