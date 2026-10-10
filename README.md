@@ -12,18 +12,17 @@ selectable backends:
 | `pmd_hdf5`   | openPMD-api → HDF5 | `.h5`  |
 | `pmd_adios2` | openPMD-api → BP5  | `.bp`  |
 
-The `pmd_*` backends write the **standard openPMD data model** (mesh
-record `field/rho` + species `electrons` with SoA `position/momentum/mass/
-id` + standard `positionOffset` constants) — production PIC checkpoint
-semantics, still bit-exactly verified.  The write path mirrors openPMD's
-own examples (8a + 3b at the 0.17.1 tag) call for call: owning
-`shared_ptr` stores, scalar records used directly on the `Record`, one
-flush at `iteration.close()`.  The AoS→SoA transpose is timed inside the
-particle window; `--pmd-split` opts into two incremental flushes to
-attribute field vs particle seconds honestly (openPMD stores are lazy —
-with the canonical single flush the split reports 0 and only the wall
-total is claimed).  Requires openPMD-api 0.16+/0.17.x (a probe falls back
-to the pre-0.17 ctor; without openPMD the backends compile out).
+The `pmd_*` backends write standard openPMD files -- the checkpoint
+format used by production PIC codes such as WarpX and PIConGPU: mesh
+`field/rho` plus species `electrons` with `position`, `momentum`, `mass`
+and `id` columns.  The code follows openPMD's own examples (8a and 3b):
+data is handed to openPMD as `shared_ptr` buffers and written with one
+flush when the iteration closes.  Everything is checked bit-exact by
+`--verify`.  Needs openPMD-api (0.16 or newer); without it these two
+backends are simply not built.  By default only the total write time is
+meaningful (openPMD defers the real work to the final flush); add
+`--pmd-split` to flush field and particle data separately and get a
+breakdown.
 
 ## What it measures
 
