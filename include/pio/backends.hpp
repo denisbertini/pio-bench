@@ -36,10 +36,14 @@ struct IoSettings {
     bool pmd_split{false};  // pmd_*: two incremental flushes -> real phase split
                             // (default: canonical single flush at
                             // iteration.close(), cf. --pmd-split)
+    bool pmd_rank_chunks{true}; // pmd_hdf5: chunk datasets at the per-rank box
+                                // (production pattern; false = openPMD "auto"
+                                // 4 MiB-capped chunks, cf. --pmd-auto-chunks)
 
     static IoSettings from(const BenchConfig& c) {
         return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
-                          c.h5_prepack, c.adi_stats, c.pmd_split};
+                          c.h5_prepack, c.adi_stats, c.pmd_split,
+                          c.pmd_rank_chunks};
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.

@@ -131,6 +131,9 @@ struct BenchConfig {
                                                // phase split; default off = the
                                                // canonical single flush at
                                                // iteration.close() (openPMD examples)
+    bool pmd_rank_chunks{true};                // pmd_hdf5: rank-aligned dataset
+                                               // chunks (one chunk per rank);
+                                               // --pmd-auto-chunks = library default
 
     // ---- time loop ------------------------------------------------------------
     int steps{10};
@@ -166,6 +169,10 @@ struct BenchConfig {
         "                         field/particle seconds (default off = the\n"
         "                         canonical single flush at iteration.close(),\n"
         "                         phase split reported as 0)\n"
+        "  --pmd-auto-chunks      pmd_hdf5: openPMD auto chunking (4 MiB-capped)\n"
+        "                         instead of the default rank-aligned chunks\n"
+        "                         (one chunk = one rank's box, production\n"
+        "                         PIConGPU/WarpX pattern)\n"
         "  --steps N              timesteps                       (10)\n"
         "  --interval N           checkpoint every N steps        (1)\n"
         "  --max-checkpoints N    cap checkpoints, -1 unlimited   (-1)\n"
@@ -243,6 +250,8 @@ struct BenchConfig {
                 cfg.adi_stats = false;
             } else if (key == "pmd-split") {
                 cfg.pmd_split = true;
+            } else if (key == "pmd-auto-chunks") {
+                cfg.pmd_rank_chunks = false;
             } else if (key == "pmd-single-flush") {
                 cfg.pmd_split = false; // legacy alias: now the default
             } else if (key == "steps") {
@@ -304,7 +313,8 @@ struct BenchConfig {
         if (backend == BackendKind::Adios2)
             os << " adi_stats=" << (adi_stats ? "on" : "off");
         if (backend == BackendKind::PmdHdf5 || backend == BackendKind::PmdAdios2)
-            os << " pmd_split=" << (pmd_split ? "on" : "off");
+            os << " pmd_split=" << (pmd_split ? "on" : "off")
+               << " pmd_chunks=" << (pmd_rank_chunks ? "rank" : "auto");
         // Audit: externally injected ROMIO hints (harness channel) are
         // always disclosed -- a run must never hide its own config.
         if (const char* ph = std::getenv("PIOB_ROMIO_HINTS"); ph && *ph)

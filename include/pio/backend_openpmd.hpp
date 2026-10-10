@@ -141,6 +141,41 @@ inline ::openPMD::Series make_series(const std::filesystem::path& base,
 #endif
 }
 
+/// RANK-ALIGNED HDF5 CHUNKS (production pattern, PIConGPU/WarpX).
+///
+/// Without explicit chunks the 0.17.1 HDF5 handler computes "auto" chunks
+/// capped at 4 MiB (getOptimalChunkDims, HDF5Auxiliary.cpp): a 128 MiB
+/// per-rank brick becomes ~64 chunks and a 32 MiB particle column 8, each
+/// first-touch an independently-locked chunk allocation -> aggregate
+/// throughput collapses (~10 MiB/s/rank measured on Lustre/Virgo).  Aligning
+/// the chunk with the per-rank box makes every rank write ONE chunk of its
+/// data: contiguous multi-MiB extents, minimal allocation traffic, and no
+/// chunk shared between ranks (the failure mode openPMD's ParallelIOTest
+/// warns about for independent writes).
+///
+/// Per-dataset option format is openPMD 0.17's own, from
+/// test/ParallelIOTest.cpp:  {"hdf5":{"dataset":{"chunks":[...]}}}
+/// (case-insensitive keys).  ADIOS2 ignores it -- BP5 aggregates per
+/// writer on its own -- so the hdf5-engine gate is deliberate.
+///
+/// The chunk extent MUST be identical on all ranks (it defines the shared
+/// dataset); local boxes are uniform by construction and the particle count
+/// is MIN-reduced to guarantee it.  Returns "{}" (= library auto) if
+/// disabled or if the aligned chunk would exceed the size cap.
+inline constexpr std::uint64_t kChunkBytesCap = 1ull << 30;  // 1 GiB
+
+inline std::string chunk_opts(const char* backend,
+                              const std::vector<std::uint64_t>& chunk) {
+    if (std::string_view(backend) != "hdf5" || chunk.empty()) return "{}";
+    std::string s = R"({"hdf5":{"dataset":{"chunks":[)";
+    for (std::size_t i = 0; i < chunk.size(); ++i) {
+        if (i) s += ',';
+        s += std::to_string(chunk[i]);
+    }
+    s += "]}}";
+    return s;
+}
+
 } // namespace openpmd_detail
 
 /// Shared implementation; the two concrete backends differ only in the
@@ -192,7 +227,14 @@ public:
         auto mesh = iteration.meshes["field"];
         mesh.setGeometry(om::Mesh::Geometry::cartesian); // nested enum (0.17.x)
         auto rho = mesh["rho"];
-        rho.resetDataset(om::Dataset(om::determineDatatype<double>(), gsz));
+        // Rank-aligned chunk: the whole per-rank brick is one chunk.
+        std::vector<std::uint64_t> fchunk;
+        if (settings_.pmd_rank_chunks && lx * ly * lz * sizeof(double) <=
+                                            openpmd_detail::kChunkBytesCap)
+            fchunk = {lx, ly, lz};
+        rho.resetDataset(
+            om::Dataset(om::determineDatatype<double>(), gsz,
+                        openpmd_detail::chunk_opts(backend_, fchunk)));
         rho.storeChunk(fbuf, st, lsz); // shared_ptr overload: owning
         openpmd_detail::dbg_store("field/rho", st, lsz, fbuf.get());
         if (settings_.pmd_split) {
@@ -204,6 +246,22 @@ public:
         // ---- particles: standard SoA species ------------------------------
         w.restart();
         const std::size_t n = parts.local_count();
+
+        // Rank-aligned particle chunks: each rank's column is one chunk.
+        // The chunk extent defines the shared dataset, so it is the MIN
+        // of the per-rank counts (identical on every rank by reduction).
+        // NOTE: collective -- must stay outside any per-rank n>0 guard.
+        std::uint64_t pcmin = 0;
+        const std::uint64_t pc = static_cast<std::uint64_t>(n);
+        MPI_Allreduce(&pc, &pcmin, 1, MPI_UINT64_T, MPI_MIN, comm_);
+        std::vector<std::uint64_t> pchunk;
+        if (settings_.pmd_rank_chunks && pcmin > 0 &&
+            pcmin <= parts.global_count() &&
+            pcmin * sizeof(double) <= openpmd_detail::kChunkBytesCap)
+            pchunk = {pcmin};
+        const std::string popts =
+            openpmd_detail::chunk_opts(backend_, pchunk);
+
         if (n > 0) {
             auto species = iteration.particles["electrons"];
             const om::Extent gcount{parts.global_count()};
@@ -225,7 +283,7 @@ public:
                 if (m.comp) {
                     auto comp = species[m.record][m.comp];
                     comp.resetDataset(om::Dataset(
-                        om::determineDatatype<double>(), gcount));
+                        om::determineDatatype<double>(), gcount, popts));
                     comp.storeChunk(std::move(col), roff, lcount);
                 } else {
                     // Canonical scalar record (example 8a): BaseRecord
@@ -233,7 +291,7 @@ public:
                     // dataset -- reset/store directly, no detached view.
                     auto rec = species[m.record];
                     rec.resetDataset(om::Dataset(
-                        om::determineDatatype<double>(), gcount));
+                        om::determineDatatype<double>(), gcount, popts));
                     rec.storeChunk(std::move(col), roff, lcount);
                 }
                 openpmd_detail::dbg_store(
@@ -248,8 +306,8 @@ public:
             for (std::size_t k = 0; k < n; ++k)
                 ids[k] = p[k].id;
             auto idrec = species["id"];
-            idrec.resetDataset(
-                om::Dataset(om::determineDatatype<std::uint64_t>(), gcount));
+            idrec.resetDataset(om::Dataset(
+                om::determineDatatype<std::uint64_t>(), gcount, popts));
             idrec.storeChunk(std::move(ids), roff, lcount);
             openpmd_detail::dbg_store("id [scalar]", roff, lcount, raw_ids);
 
