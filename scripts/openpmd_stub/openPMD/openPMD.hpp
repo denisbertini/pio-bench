@@ -26,6 +26,9 @@ using Extent = std::vector<std::uint64_t>;
 
 enum class Access { READ_ONLY, CREATE, APPEND, READ_WRITE };
 
+// 0.17.1: lowerCamelCase enumerators (IterationEncoding.hpp).
+enum class IterationEncoding { fileBased, groupBased, variableBased };
+
 template <typename T>
 struct DatatypeTag {};
 template <typename T>
@@ -83,6 +86,7 @@ struct Series {
     ContainerLike<Iteration> iterations;
     Series(const std::string&, Access, MPI_Comm, const std::string& = "{}") {}
     Series(const std::string&, Access, const std::string& = "{}") {}
+    Series& setIterationEncoding(IterationEncoding) { return *this; }
     void flush(std::string = "{}") {}
 };
 

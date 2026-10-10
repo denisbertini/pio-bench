@@ -224,6 +224,18 @@ public:
 
         om::Series series = openpmd_detail::make_series(
             path, backend_, om::Access::CREATE, comm_);
+        if (std::string_view(backend_) == "adios2") {
+            // openPMD's startup warning, verbatim: "Use of group-based
+            // encoding in ADIOS2 is discouraged as it can lead to drastic
+            // performance issues" -- one atomic logical write at close and
+            // metadata that grows per step.  File-based encoding is the
+            // recommended mode (it is what PIConGPU ships): one ADIOS2
+            // file per iteration, each closed atomically.  With one
+            // iteration per Series here, that is exactly the checkpoint
+            // pattern.  (Read side auto-detects the encoding; no matching
+            // change needed there.)
+            series.setIterationEncoding(om::IterationEncoding::fileBased);
+        }
         auto iteration = series.iterations[0];
 
         const om::Extent gsz{static_cast<std::uint64_t>(d.global[0]),
