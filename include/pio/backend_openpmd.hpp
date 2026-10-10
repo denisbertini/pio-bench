@@ -41,6 +41,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -57,6 +59,32 @@ namespace pio {
 #ifdef PIO_HAVE_OPENPMD
 
 namespace openpmd_detail {
+
+/// PIO_PMD_DEBUG=1: dump every storeChunk parameter before enqueue so a
+/// crash run is self-describing (dataset, offset, extent, buffer pointer).
+inline bool pmd_debug() {
+    static const bool on = [] {
+        const char* e = std::getenv("PIO_PMD_DEBUG");
+        return e && e[0] == '1';
+    }();
+    return on;
+}
+inline void dbg_store(const char* what, const std::vector<uint64_t>& off,
+                      const std::vector<uint64_t>& ext, const void* ptr) {
+    if (!pmd_debug()) return;
+    fprintf(stderr,
+            "[pmd-dbg] store %-28s off={%llu,%llu,%llu} ext={%llu,%llu,%llu} "
+            "buf=%p\n",
+            what, (unsigned long long)(off.size() > 0 ? off[0] : 0),
+            (unsigned long long)(off.size() > 1 ? off[1] : 0),
+            (unsigned long long)(off.size() > 2 ? off[2] : 0),
+            (unsigned long long)(ext.size() > 0 ? ext[0] : 0),
+            (unsigned long long)(ext.size() > 1 ? ext[1] : 0),
+            (unsigned long long)(ext.size() > 2 ? ext[2] : 0), ptr);
+}
+inline void dbg_flush(const char* phase) {
+    if (pmd_debug()) fprintf(stderr, "[pmd-dbg] FLUSH >>> %s\n", phase);
+}
 
 /// Standard-name member table: AoS member -> (record, component).
 /// Scalar records carry comp == nullptr (the record IS the dataset).
@@ -146,7 +174,9 @@ public:
         auto rho = mesh["rho"];
         rho.resetDataset(om::Dataset(om::determineDatatype<double>(), gsz));
         rho.storeChunk(fbuf, st, lsz); // contiguous-container overload
+        openpmd_detail::dbg_store("field/rho", st, lsz, fbuf.data());
         if (settings_.pmd_split) {
+            openpmd_detail::dbg_flush("1/2: field");
             series.flush();
             split.field_seconds = w.elapsed();
         }
@@ -191,11 +221,17 @@ public:
                     comp.resetDataset(
                         om::Dataset(om::determineDatatype<double>(), gcount));
                     comp.storeChunk(cols[c], roff, lcount);
+                    openpmd_detail::dbg_store(
+                        (std::string(m.record) + "/" + m.comp).c_str(), roff,
+                        lcount, cols[c].data());
                 } else {
                     om::RecordComponent comp(rec);
                     comp.resetDataset(
                         om::Dataset(om::determineDatatype<double>(), gcount));
                     comp.storeChunk(cols[c], roff, lcount);
+                    openpmd_detail::dbg_store(
+                        (std::string(m.record) + " [scalar-view]").c_str(),
+                        roff, lcount, cols[c].data());
                 }
             }
             // id: the standard unsigned-64 particle id record (scalar).
@@ -205,8 +241,11 @@ public:
             idrec.resetDataset(
                 om::Dataset(om::determineDatatype<std::uint64_t>(), gcount));
             idrec.storeChunk(ids, roff, lcount);
+            openpmd_detail::dbg_store("id [scalar-view]", roff, lcount,
+                                      ids.data());
         }
         if (settings_.pmd_split) {
+            openpmd_detail::dbg_flush("2/2: particles");
             series.flush();
             split.particle_seconds = w.elapsed();
         } else {
