@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,10 @@ int main(int argc, char** argv) {
                              // that kills in pio_bench; stage-by-stage
                              // passes at 1 rank, so the multi-record
                              // single-flush is the suspect under test
+    bool geom = false;       // replicate backend's setGeometry(cartesian)
+    bool rand_ = false;      // fill buffers with RNG data (backend writes
+                             // real values; constant fills could mask a
+                             // content-dependent effect)
     std::uint64_t np = 4000000;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
@@ -63,6 +68,8 @@ int main(int argc, char** argv) {
         else if (a == "constmass") { mass = true; constmass = true; }
         else if (a == "id") id = true;
         else if (a == "all") all = true;
+        else if (a == "geom") geom = true;
+        else if (a == "rand") rand_ = true;
         else if (a == "np" && i + 1 < argc) np = strtoull(argv[++i], nullptr, 10);
     }
 
@@ -101,10 +108,28 @@ int main(int argc, char** argv) {
     std::vector<double> masscol(np, 1.0);
     std::vector<std::uint64_t> ids(np, 7);
 
+    if (rand_) {  // replicate pio_bench's real-value payloads: deterministic
+                   // per-rank RNG fill of every buffer (constant fills could
+                   // mask a content-dependent effect; none is known, but the
+                   // repro must differ from the backend in NOTHING but code)
+        std::mt19937_64 rng(0x9e37u + (unsigned)rank);
+        std::uniform_real_distribution<double> u(0.0, 1.0);
+        for (auto& v : fbuf) v = u(rng);
+        for (auto& v : poscol) v = u(rng);
+        for (auto& v : masscol) v = u(rng);
+        for (auto& v : ids) v = rng();
+    }
+
     // buffers for the full backend shape (7 double columns + ids), main
     // scope for the same lifetime reason as above
     constexpr int ncol = 7;  // position x/y/z, momentum x/y/z, mass
     std::vector<std::vector<double>> cols(ncol, std::vector<double>(np, 0.5));
+    if (rand_) {  // all-mode buffers are the ones matching the backend shape
+        std::mt19937_64 rng(0x9e37u + (unsigned)rank);
+        std::uniform_real_distribution<double> u(0.0, 1.0);
+        for (auto& col : cols)
+            for (auto& v : col) v = u(rng);
+    }
     // rank-distributed layout, exactly like pio_bench: each rank owns a
     // disjoint slice of the GLOBAL datasets (the repro default wrote all
     // ranks at offset 0 -- same API calls, wrong scale; the crash config
@@ -120,7 +145,10 @@ int main(int argc, char** argv) {
 
     if (field) {
         stage("field rho", [&] {
-            auto rho = iteration.meshes["field"]["rho"];
+            auto mesh = iteration.meshes["field"];
+            if (geom)
+                mesh.setGeometry(om::Mesh::Geometry::cartesian);
+            auto rho = mesh["rho"];
             rho.resetDataset(om::Dataset(om::determineDatatype<double>(),
                                          {lx * 4, ly * 4, lz * 2}));
             rho.storeChunk(fbuf,
