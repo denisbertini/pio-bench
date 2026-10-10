@@ -65,23 +65,39 @@ int main(int argc, char** argv) {
     const hsize_t per = global / (hsize_t)size;
 
     hid_t fcpl = H5Pcreate(H5P_FILE_CREATE);
-    if (libver == "earliest")
-        H5Pset_libver_bounds(fcpl, H5F_LIBVER_EARLIEST, H5F_LIBVER_EARLIEST);
-    else if (libver == "v16")
-        H5Pset_libver_bounds(fcpl, H5F_LIBVER_EARLIEST, H5F_LIBVER_V16);
-    else if (libver == "v18")
-        H5Pset_libver_bounds(fcpl, H5F_LIBVER_EARLIEST, H5F_LIBVER_V18);
-    else if (libver == "v110")
-        H5Pset_libver_bounds(fcpl, H5F_LIBVER_EARLIEST, H5F_LIBVER_V110);
-    else if (libver == "v112")
-        H5Pset_libver_bounds(fcpl, H5F_LIBVER_EARLIEST, H5F_LIBVER_V112);
-    else if (libver == "v114") {
-#ifdef H5F_LIBVER_V114
-        H5Pset_libver_bounds(fcpl, H5F_LIBVER_V114, H5F_LIBVER_V114);
-#else
-        if (!rank) fprintf(stderr, "[probe] no V114 enum in this HDF5\n");
-        MPI_Abort(MPI_COMM_WORLD, 2);
+    // HDF5 2.x removes old libver enum values (V16 confirmed gone in 2.2.0);
+    // guard each so the probe compiles on both 1.14-era and 2.x headers.
+    bool libver_set = libver == "default";
+#define PIO_LIBVER(NAME, LOW, HIGH)                         \
+    if (libver == NAME) {                                   \
+        H5Pset_libver_bounds(fcpl, LOW, HIGH);              \
+        libver_set = true;                                  \
+    }
+#ifdef H5F_LIBVER_EARLIEST
+    PIO_LIBVER("earliest", H5F_LIBVER_EARLIEST, H5F_LIBVER_EARLIEST)
 #endif
+#ifdef H5F_LIBVER_V16
+    PIO_LIBVER("v16", H5F_LIBVER_EARLIEST, H5F_LIBVER_V16)
+#endif
+#ifdef H5F_LIBVER_V18
+    PIO_LIBVER("v18", H5F_LIBVER_EARLIEST, H5F_LIBVER_V18)
+#endif
+#ifdef H5F_LIBVER_V110
+    PIO_LIBVER("v110", H5F_LIBVER_EARLIEST, H5F_LIBVER_V110)
+#endif
+#ifdef H5F_LIBVER_V112
+    PIO_LIBVER("v112", H5F_LIBVER_EARLIEST, H5F_LIBVER_V112)
+#endif
+#ifdef H5F_LIBVER_V114
+    PIO_LIBVER("v114", H5F_LIBVER_EARLIEST, H5F_LIBVER_V114)
+#endif
+#undef PIO_LIBVER
+    if (!libver_set) {
+        if (!rank)
+            fprintf(stderr,
+                    "[probe] libver '%s' not in this HDF5's enum set\n",
+                    libver.c_str());
+        MPI_Abort(MPI_COMM_WORLD, 2);
     }
     if (acorder)
         H5Pset_attr_creation_order(
