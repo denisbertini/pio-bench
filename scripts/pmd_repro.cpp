@@ -67,8 +67,13 @@ int main(int argc, char** argv) {
     }
 
     // Backend from the file ending (.h5 -> hdf5, .bp -> adios2), exactly as
-    // pio-bench resolves it.
-    om::Series series(file, om::Access::CREATE, MPI_COMM_WORLD);
+    // pio-bench resolves it. EXACT backend delta closed here: pio-bench
+    // passes the backend via options JSON (not extension inference) and
+    // sets mesh geometry -- replicate both.
+    const bool adios2 = file.size() >= 3 && file.substr(file.size() - 3) == ".bp";
+    om::Series series(file, om::Access::CREATE, MPI_COMM_WORLD,
+                      std::string("{\"backend\":\"") +
+                          (adios2 ? "adios2" : "hdf5") + "\"}");
     auto iteration = series.iterations[0];
 
     bool ok = true;
@@ -100,13 +105,26 @@ int main(int argc, char** argv) {
     // scope for the same lifetime reason as above
     constexpr int ncol = 7;  // position x/y/z, momentum x/y/z, mass
     std::vector<std::vector<double>> cols(ncol, std::vector<double>(np, 0.5));
+    // rank-distributed layout, exactly like pio_bench: each rank owns a
+    // disjoint slice of the GLOBAL datasets (the repro default wrote all
+    // ranks at offset 0 -- same API calls, wrong scale; the crash config
+    // is 4 GiB field + 1 GiB per particle component at 32 ranks)
+    int nranks = 1;
+    MPI_Comm_size(MPI_COMM_WORLD, &nranks);
+    const std::uint64_t gpart = np * (std::uint64_t)nranks;
+    const std::uint64_t poff = (std::uint64_t)rank * np;
+    // field: global 1024x1024x512, rank r writes a 256x256x256 slice at a
+    // 4x4x2 decomposition (pio_bench --local 256, 32 ranks)
+    const std::uint64_t lx = 256, ly = 256, lz = 256;
+    const int rz_ = rank / 16, ry_ = (rank / 4) % 4, rx_ = rank % 4;
 
     if (field) {
         stage("field rho", [&] {
             auto rho = iteration.meshes["field"]["rho"];
-            rho.resetDataset(
-                om::Dataset(om::determineDatatype<double>(), {n, n, n}));
-            rho.storeChunk(fbuf, {0, 0, 0}, {n, n, n});
+            rho.resetDataset(om::Dataset(om::determineDatatype<double>(),
+                                         {lx * 4, ly * 4, lz * 2}));
+            rho.storeChunk(fbuf,
+                           {rx_ * lx, ry_ * ly, rz_ * lz}, {lx, ly, lz});
         });
     }
     auto species = iteration.particles["electrons"];
@@ -122,19 +140,19 @@ int main(int argc, char** argv) {
                 if (comps[c]) {
                     auto comp = rec[comps[c]];
                     comp.resetDataset(
-                        om::Dataset(om::determineDatatype<double>(), {np}));
-                    comp.storeChunk(cols[c], {0}, {np});
+                        om::Dataset(om::determineDatatype<double>(), {gpart}));
+                    comp.storeChunk(cols[c], {poff}, {np});
                 } else {
                     om::RecordComponent comp(rec);
                     comp.resetDataset(
-                        om::Dataset(om::determineDatatype<double>(), {np}));
-                    comp.storeChunk(cols[c], {0}, {np});
+                        om::Dataset(om::determineDatatype<double>(), {gpart}));
+                    comp.storeChunk(cols[c], {poff}, {np});
                 }
             }
             om::RecordComponent idrec(species["id"]);
             idrec.resetDataset(
-                om::Dataset(om::determineDatatype<std::uint64_t>(), {np}));
-            idrec.storeChunk(ids, {0}, {np});
+                om::Dataset(om::determineDatatype<std::uint64_t>(), {gpart}));
+            idrec.storeChunk(ids, {poff}, {np});
         });
     }
     if (pos) {

@@ -7,9 +7,13 @@ BENCH=${BENCH:-/lustre/rz/dbertini2/pio-bench/build/pio_bench}
 RANKS=${RANKS:-32}
 run() {
     echo "==== $1"
+    local log=/tmp/pmdrow.log
     mpirun -n "$RANKS" "$BENCH" --backend pmd_hdf5 --dir=./ --local 256 \
-           --particles 4000000 --steps 1 --keep-files 2>&1 \
-      | grep -E "chkpt |Failed to write" | head -3
+           --particles 4000000 --steps 1 --keep-files > "$log" 2>&1
+    local rc=$?
+    grep -E "chkpt |Failed to write" "$log" | head -3
+    echo "exit=$rc; tail:"
+    grep -vE "No file ending" "$log" | tail -6
 }
 unset OPENPMD_HDF5_PAGED_ALLOCATION OPENPMD_HDF5_DEFER_METADATA OPENPMD_HDF5_INDEPENDENT
 run "baseline (all openPMD defaults ON) -- expect death at mass"
