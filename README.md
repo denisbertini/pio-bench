@@ -14,11 +14,16 @@ selectable backends:
 
 The `pmd_*` backends write the **standard openPMD data model** (mesh
 record `field/rho` + species `electrons` with SoA `position/momentum/mass/
-id`) — production PIC checkpoint semantics, still bit-exactly verified.
-The AoS→SoA transpose is timed inside the particle window; the field/
-particle split uses two incremental flushes (openPMD stores are lazy, so
-flush time is honestly attributed and `iteration.close()` stays outside
-both windows).
+id` + standard `positionOffset` constants) — production PIC checkpoint
+semantics, still bit-exactly verified.  The write path mirrors openPMD's
+own examples (8a + 3b at the 0.17.1 tag) call for call: owning
+`shared_ptr` stores, scalar records used directly on the `Record`, one
+flush at `iteration.close()`.  The AoS→SoA transpose is timed inside the
+particle window; `--pmd-split` opts into two incremental flushes to
+attribute field vs particle seconds honestly (openPMD stores are lazy —
+with the canonical single flush the split reports 0 and only the wall
+total is claimed).  Requires openPMD-api 0.16+/0.17.x (a probe falls back
+to the pre-0.17 ctor; without openPMD the backends compile out).
 
 ## What it measures
 
@@ -30,7 +35,8 @@ Every checkpoint writes, into **one** file:
   deterministically per rank (seeded by `seed, rank`) and merged into the
   same file across all ranks.
 
-Per-phase timings (fields vs particles) and throughput are reported live
+Per-phase timings (fields vs particles; for `pmd_*` only with
+`--pmd-split`, see above) and throughput are reported live
 and appended as machine-readable JSON Lines (`pio_metrics.jsonl`), each
 line stamped with `benchmark_version`.
 
@@ -60,6 +66,19 @@ mpirun -n 64 ./build/pio_bench \
 `--help` lists all options. `--verify` reads the checkpoint back — field
 cells sampled, particle blocks fully — and a mismatch aborts the job.
 
+On Lustre, create the output directory striped — a single file lands on
+ONE OST, capping every backend at one target's rate:
+
+```sh
+mkdir -p chkpts && lfs setstripe -c 8 chkpts/     # 8 OSTs; more for bigger jobs
+HDF5_USE_FILE_LOCKING=FALSE mpirun -n 32 ./build/pio_bench \
+    --backend pmd_hdf5 --dir ./chkpts ...          # safe: one job, write-once files
+```
+
+`pmd_hdf5` knobs: `pmd_chunks=rank` (default) aligns each dataset chunk
+with the per-rank box (openPMD's auto-chunker caps at 4 MiB and shatters
+the brick); `--pmd-auto-chunks` restores the library default for A/B.
+
 Under Darshan:
 
 ```sh
@@ -69,11 +88,26 @@ DARSHAN_LOGPATH=$PWD darshan-runtime mpirun -n 64 ./build/pio_bench ...
 ## Test
 
 ```sh
-scripts/smoke.sh        # runs every compiled-in backend with --verify
+scripts/smoke.sh          # runs every compiled-in backend with --verify
+scripts/pmd_env_matrix.sh # pmd throughput attribution matrix (one mpirun
+                          # per row: locking, transfer mode, allocation,
+                          # metadata, chunking, ADIOS2 reference)
 ```
 
 Backends absent from the build report `SKIPPED`, not failure. Tunables:
 `RANKS`, `LOCAL`, `PARTICLES`, `STEPS`, `MPIRUN` (see script header).
+
+Measured on Lustre/Virgo, 32 ranks on one node, 11.9 GiB/checkpoint,
+`--verify` clean throughout (single-shot numbers, ~±25% node contention
+noise — trust same-run ratios):
+
+| config | MiB/s |
+|---|---|
+| `pmd_hdf5`, openPMD defaults | 311 |
+| `pmd_hdf5`, rank-aligned chunks | 625 |
+| `pmd_adios2` (per-writer files) | 1069 |
+| raw `hdf5` backend | 1129 |
+| **`pmd_hdf5`, rank chunks + `lfs setstripe -c 8` dir** | **1200** |
 
 ## Notes
 
@@ -98,18 +132,13 @@ Backends absent from the build report `SKIPPED`, not failure. Tunables:
   records used directly on the Record (`BaseRecord` IS-A `RecordComponent`),
   standard `positionOffset` constants, single flush at `iteration.close()`
   (`--pmd-split` opts into the two-flush phase timing).
-* `pmd_hdf5` throughput attribution, Lustre/Virgo, 32 ranks, 11.9 GiB /
-  checkpoint (each step measured, verified clean): 311 MiB/s library
-  defaults -> 625 with RANK-ALIGNED CHUNKS (default `pmd_chunks=rank`;
-  openPMD's auto-chunker caps at 4 MiB and shatters the per-rank brick)
-  -> 1200 writing into a directory striped with `lfs setstripe -c 8`.
-  A single file lands on ONE OST, so unstriped output is capped at one
-  target's rate regardless of rank count -- the checkpoint-directory
-  stripe policy is the harness contract (see Integration), not an
-  application knob.  `HDF5_USE_FILE_LOCKING=FALSE` adds ~19% more for
-  write-then-read-only runs in one MPI job (matrix:
-  `scripts/pmd_env_matrix.sh`).  `pmd_adios2` sidesteps all of this by
-  design (per-writer files fan out across OSTs by themselves).
+* `pmd_hdf5` vs `pmd_adios2` gap on Lustre = shared-file coordination tax,
+  attributed row-by-row by `scripts/pmd_env_matrix.sh`: chunk layout is
+  ~2x (fixed by rank-aligned chunks), file locking through the MDS ~19%,
+  transfer mode / paged file-space / deferred metadata ~0.  The dominant
+  factor is the filesystem itself: one file = one OST, so the striped
+  output directory (table above) is what puts HDF5 on top.  `pmd_adios2`
+  fans out across OSTs implicitly (per-writer files).
 
 ## Integration (mpiio_evolve)
 
