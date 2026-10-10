@@ -48,6 +48,12 @@ int main(int argc, char** argv) {
     std::string file = argc > 1 ? argv[1] : "r.h5";
     bool field = false, pos = false, mass = false, id = false;
     bool constmass = false;  // mass as CONSTANT record (production pattern)
+    bool all = false;        // EXACT backend shape: 8 SoA records
+                             // (position x/y,z; momentum x/y/z; mass; id)
+                             // all enqueued, then ONE flush -- the shape
+                             // that kills in pio_bench; stage-by-stage
+                             // passes at 1 rank, so the multi-record
+                             // single-flush is the suspect under test
     std::uint64_t np = 4000000;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
@@ -56,6 +62,7 @@ int main(int argc, char** argv) {
         else if (a == "mass") mass = true;
         else if (a == "constmass") { mass = true; constmass = true; }
         else if (a == "id") id = true;
+        else if (a == "all") all = true;
         else if (a == "np" && i + 1 < argc) np = strtoull(argv[++i], nullptr, 10);
     }
 
@@ -89,6 +96,11 @@ int main(int argc, char** argv) {
     std::vector<double> masscol(np, 1.0);
     std::vector<std::uint64_t> ids(np, 7);
 
+    // buffers for the full backend shape (7 double columns + ids), main
+    // scope for the same lifetime reason as above
+    constexpr int ncol = 7;  // position x/y/z, momentum x/y/z, mass
+    std::vector<std::vector<double>> cols(ncol, std::vector<double>(np, 0.5));
+
     if (field) {
         stage("field rho", [&] {
             auto rho = iteration.meshes["field"]["rho"];
@@ -98,6 +110,33 @@ int main(int argc, char** argv) {
         });
     }
     auto species = iteration.particles["electrons"];
+    if (all) {
+        stage("ALL: pos xyz + mom xyz + mass + id, ONE flush", [&] {
+            static const char* recs[ncol] = {"position", "position",
+                                             "position", "momentum",
+                                             "momentum", "momentum", "mass"};
+            static const char* comps[ncol] = {"x", "y", "z", "x", "y", "z",
+                                              nullptr};
+            for (int c = 0; c < ncol; ++c) {
+                auto rec = species[recs[c]];
+                if (comps[c]) {
+                    auto comp = rec[comps[c]];
+                    comp.resetDataset(
+                        om::Dataset(om::determineDatatype<double>(), {np}));
+                    comp.storeChunk(cols[c], {0}, {np});
+                } else {
+                    om::RecordComponent comp(rec);
+                    comp.resetDataset(
+                        om::Dataset(om::determineDatatype<double>(), {np}));
+                    comp.storeChunk(cols[c], {0}, {np});
+                }
+            }
+            om::RecordComponent idrec(species["id"]);
+            idrec.resetDataset(
+                om::Dataset(om::determineDatatype<std::uint64_t>(), {np}));
+            idrec.storeChunk(ids, {0}, {np});
+        });
+    }
     if (pos) {
         stage("position/x (normal component)", [&] {
             auto c = species["position"]["x"];
