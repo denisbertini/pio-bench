@@ -146,13 +146,19 @@ if(PIO_WITH_OPENPMD)
     # component storeChunk, void* store, typed shared_ptr load), so a
     # "compiled OUT" verdict means the build is truly incompatible, not
     # that one guessed signature missed.
+    # NOTE ON ESCAPING (learned the hard way): check_cxx_source_compiles is
+    # a MACRO; with CMP0219 unset its arguments lose one more round of
+    # backslash processing, so any probe source that needs literal \" in the
+    # generated C++ (embedded JSON!) arrives corrupted and fails for the
+    # wrong reason. Keep these sources FREE of remaining backslashes: the
+    # default-options ctor + .h5 filename picks the backend without JSON.
     include(CheckCXXSourceCompiles)
     set(PIO_PMD_PROBE "
 #include <openPMD/openPMD.hpp>
 #include <mpi.h>
 int main() {
-  openPMD::Series s(\"probe_only_unused\", openPMD::Access::Create,
-                    MPI_COMM_WORLD, std::string(\"{\\\"backend\\\":\\\"hdf5\\\"}\"));
+  openPMD::Series s(\"probe_only_unused.h5\", openPMD::Access::Create,
+                    MPI_COMM_WORLD);
   auto it = s.iterations[0];
   double buf[2] = {1.0, 2.0};
   auto comp = it.meshes[\"m\"][\"c\"];
@@ -172,9 +178,9 @@ int main() {
     set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX openPMD::openPMD)
     check_cxx_source_compiles("${PIO_PMD_PROBE}" PIO_PMD_CTOR_CURRENT)
     if(NOT PIO_PMD_CTOR_CURRENT)
-      # legacy form: Series(path, access, engine, comm)
-      string(REPLACE "MPI_COMM_WORLD, std::string(\"{\\\"backend\\\":\\\"hdf5\\\"}\")"
-                     "std::string(\"HDF5\"), MPI_COMM_WORLD"
+      # legacy form: Series(path, access, engine, comm) -- old releases only
+      string(REPLACE "MPI_COMM_WORLD);"
+                     "std::string(\"HDF5\"), MPI_COMM_WORLD);"
                      PIO_PMD_PROBE_LEGACY "${PIO_PMD_PROBE}")
       check_cxx_source_compiles("${PIO_PMD_PROBE_LEGACY}" PIO_PMD_CTOR_LEGACY)
     endif()
@@ -183,7 +189,7 @@ int main() {
       target_compile_definitions(pio_bench PRIVATE PIO_HAVE_OPENPMD=1)
       target_link_libraries(pio_bench PRIVATE openPMD::openPMD)
       message(STATUS "pio_bench: openPMD backend ON (pmd_hdf5 + pmd_adios2, "
-                     "current (path,access,comm,options) API)")
+                     "current (path,access,comm[,options]) API)")
     elseif(PIO_PMD_CTOR_LEGACY)
       target_compile_definitions(pio_bench PRIVATE PIO_HAVE_OPENPMD=1
                                  PIO_PMD_LEGACY_CTOR=1)
@@ -191,10 +197,12 @@ int main() {
       message(STATUS "pio_bench: openPMD backend ON (legacy engine-string ctor)")
     else()
       message(STATUS "pio_bench: openPMD found but NEITHER Series ctor form "
-                     "compiles against its headers -- pmd_* backends compiled "
-                     "OUT. Check the probe log:")
-      message(STATUS "  ${CMAKE_BINARY_DIR}/CMakeFiles/CMakeError.log "
-                     "(or rerun cmake with --debug-trycompile)")
+                     "compiles -- pmd_* backends compiled OUT. Ask the "
+                     "compiler directly for the real error:")
+      message(STATUS "  mpicxx -std=c++20 ${CMAKE_SOURCE_DIR}/scripts/openpmd_probe.cpp "
+                     "-lopenPMD -o /tmp/pmd_probe   (add -DPIO_PMD_LEGACY_CTOR"
+                     " for the old ctor; extend -L/-I if openPMD is outside "
+                     "the default paths)")
     endif()
   else()
     message(STATUS "pio_bench: openPMD not found -- pmd_* backends compiled OUT")
