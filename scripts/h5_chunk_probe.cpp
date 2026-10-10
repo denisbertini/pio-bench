@@ -15,7 +15,20 @@
 //   (trailing flags, any order: "acorder" = attribute-creation-order
 //    on the file-creation list + one attribute, mimicking openPMD's
 //    file-customization habits; "indep" = INDEPENDENT H5Dwrite, which
-//    is what openPMD's HDF5 backend actually uses for chunk writes)
+//    is what openPMD's HDF5 backend actually uses for chunk writes;
+//    "multi K M" = after the main dataset, sequentially create+write K
+//    extra chunked datasets of M elems each in the SAME file (replays
+//    openPMD's flush: field then 7 particle components, all open, all
+//    written in order); "attrs" = write one attribute on every dataset
+//    right before its data write AND enable openPMD's default FAPL
+//    collective-metadata switches (coll_metadata_write +
+//    all_coll_metadata_ops) -- openPMD interleaves collective metadata
+//    with independent data writes, a known-landmine combo this probe
+//    previously never exercised.)
+//
+// Full openPMD-sequence replay of the pmd_hdf5 crash geometry (32 ranks):
+//   mpirun -n 32 /tmp/h5probe m.h5 512000000 4000000 indep multi 7 128000000 attrs
+//   (main = 4 GiB "field", then 7 x 1 GiB "components", ~mass is #7)
 //
 // Verdict table:
 //   p1 fails, p4 passes  -> HDF5 2.2 parallel CHUNK layer is the wall.
@@ -56,14 +69,21 @@ int main(int argc, char** argv) {
     }
     const hsize_t global = strtoull(argv[2], nullptr, 10);
     const hsize_t chunk = strtoull(argv[3], nullptr, 10);
-    // argv[4..] free-form: one libver name + optional "acorder"/"indep" flags
+    // argv[4..] free-form: one libver name + optional "acorder"/"indep"/
+    // "attrs" flags + optional "multi K M"
     std::string libver = "default";
-    bool acorder = false, indep = false;
+    bool acorder = false, indep = false, attrs = false;
+    int multi_k = 0;
+    hsize_t multi_m = 0;
     for (int i = 4; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "acorder") acorder = true;
         else if (a == "indep") indep = true;
-        else libver = a;
+        else if (a == "attrs") attrs = true;
+        else if (a == "multi" && i + 2 < argc) {
+            multi_k = atoi(argv[++i]);
+            multi_m = strtoull(argv[++i], nullptr, 10);
+        } else libver = a;
     }
 
     if (global % (hsize_t)size) {
@@ -114,6 +134,10 @@ int main(int argc, char** argv) {
 
     hid_t fapl = H5Pcreate(H5P_FILE_ACCESS);
     H5Pset_fapl_mpio(fapl, MPI_COMM_WORLD, MPI_INFO_NULL);
+    if (attrs) {  // openPMD's ParallelHDF5IOHandler sets BOTH by default:
+        H5Pset_all_coll_metadata_ops(fapl, 1);
+        H5Pset_coll_metadata_write(fapl, 1);
+    }
     hid_t file = H5Fcreate(argv[1], H5F_ACC_TRUNC, fcpl, fapl);
     if (file < 0) h5die("H5Fcreate", MPI_COMM_WORLD);
 
@@ -160,6 +184,49 @@ int main(int argc, char** argv) {
                libver.c_str(), (int)acorder, indep ? "INDEPENDENT" : "collective",
                per * 8.0 / 1048576.0, (int)rc,
                dt, global * 8.0 / 1048576.0 / (dt > 0 ? dt : 1e-9));
+
+    // multi: replay openPMD's flush sequence -- K further chunked datasets,
+    // each rank writing its slice, all dataset handles kept open as openPMD
+    // leaves them until iteration close. Reports rc per dataset so the
+    // equivalent of "dies at mass (#7)" is visible directly.
+    if (multi_k > 0 && multi_m % (hsize_t)size) {
+        if (!rank) fprintf(stderr, "[probe] multi M must divide by ranks\n");
+        MPI_Abort(MPI_COMM_WORLD, 2);
+    }
+    const hsize_t per_k = multi_m / (hsize_t)size;
+    std::vector<double> buf2(per_k, 1.0);
+    for (int k = 0; k < multi_k; ++k) {
+        char name[32];
+        snprintf(name, sizeof name, "probe_%d", k);
+        hid_t ds = H5Dcreate2(file, name, H5T_NATIVE_DOUBLE,
+                              H5Screate_simple(1, &multi_m, nullptr),
+                              H5P_DEFAULT, dcpl, H5P_DEFAULT);
+        if (ds < 0) h5die("multi H5Dcreate2", MPI_COMM_WORLD);
+        if (attrs) {  // attribute on the dataset right before its data write
+            hid_t at = H5Acreate2(ds, "unit_dimension", H5T_NATIVE_INT,
+                                  H5Screate(H5S_SCALAR), H5P_DEFAULT,
+                                  H5P_DEFAULT);
+            int v = k;
+            if (at < 0 || H5Awrite(at, H5T_NATIVE_INT, &v) < 0)
+                h5die("multi attr write", MPI_COMM_WORLD);
+            H5Aclose(at);
+        }
+        hid_t fsk = H5Dget_space(ds);
+        hsize_t st_k = (hsize_t)rank * per_k;
+        if (H5Sselect_hyperslab(fsk, H5S_SELECT_SET, &st_k, nullptr, &per_k,
+                                nullptr) < 0)
+            h5die("multi select", MPI_COMM_WORLD);
+        hid_t memk = H5Screate_simple(1, &per_k, nullptr);
+        herr_t rc_k = H5Dwrite(ds, H5T_NATIVE_DOUBLE, memk, fsk, xfer,
+                               buf2.data());
+        if (!rank)
+            printf("[probe]   dset %s (elems=%llu) rc=%d\n", name,
+                   (unsigned long long)multi_m, (int)rc_k);
+        if (rc_k < 0) rc = rc_k;
+        H5Sclose(memk);
+        H5Sclose(fsk);
+        // keep ds open: openPMD holds datasets until iteration close
+    }
 
     H5Dclose(dset);
     H5Fclose(file);
