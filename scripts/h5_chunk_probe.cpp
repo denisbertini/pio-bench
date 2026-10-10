@@ -12,9 +12,10 @@
 //   mpirun -n 32 /tmp/h5probe p2.h5 128000000 4000000 v114     # libver bounds v114
 //   mpirun -n 32 /tmp/h5probe p3.h5 128000000 1000000          # chunk 8 MiB
 //   mpirun -n 32 /tmp/h5probe p4.h5 128000000 0                # contiguous control
-//   (append "acorder" to any run to also set attribute-creation-order
-//    on the file-creation list + write one attribute, mimicking
-//    openPMD's file-customization habits)
+//   (trailing flags, any order: "acorder" = attribute-creation-order
+//    on the file-creation list + one attribute, mimicking openPMD's
+//    file-customization habits; "indep" = INDEPENDENT H5Dwrite, which
+//    is what openPMD's HDF5 backend actually uses for chunk writes)
 //
 // Verdict table:
 //   p1 fails, p4 passes  -> HDF5 2.2 parallel CHUNK layer is the wall.
@@ -47,15 +48,23 @@ int main(int argc, char** argv) {
         if (!rank)
             fprintf(stderr,
                     "usage: %s <file.h5> <global_elems> <chunk_elems|0=contig>"
-                    " [default|earliest|v16|v18|v110|v112|v114] [acorder]\n",
+                    " [default|earliest|v16|v18|v110|v112|v114] [acorder]"
+                    " [indep]\n",
                     argv[0]);
         MPI_Finalize();
         return 2;
     }
     const hsize_t global = strtoull(argv[2], nullptr, 10);
     const hsize_t chunk = strtoull(argv[3], nullptr, 10);
-    const std::string libver = argc > 4 ? argv[4] : "default";
-    const bool acorder = argc > 5 && !strcmp(argv[5], "acorder");
+    // argv[4..] free-form: one libver name + optional "acorder"/"indep" flags
+    std::string libver = "default";
+    bool acorder = false, indep = false;
+    for (int i = 4; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "acorder") acorder = true;
+        else if (a == "indep") indep = true;
+        else libver = a;
+    }
 
     if (global % (hsize_t)size) {
         if (!rank) fprintf(stderr, "[probe] global must divide by ranks\n");
@@ -134,7 +143,8 @@ int main(int argc, char** argv) {
                             nullptr) < 0)
         h5die("H5Sselect_hyperslab", MPI_COMM_WORLD);
     hid_t xfer = H5Pcreate(H5P_DATASET_XFER);
-    H5Pset_dxpl_mpio(xfer, H5FD_MPIO_COLLECTIVE);
+    H5Pset_dxpl_mpio(xfer, indep ? H5FD_MPIO_INDEPENDENT
+                                 : H5FD_MPIO_COLLECTIVE);
 
     MPI_Barrier(MPI_COMM_WORLD);
     double t0 = MPI_Wtime();
@@ -144,9 +154,11 @@ int main(int argc, char** argv) {
 
     if (!rank)
         printf("[probe] file=%s global=%llu chunk=%llu libver=%s acorder=%d "
-               "write/rank=%.1f MiB  rc=%d  %.2f s (%.0f MiB/s aggregate)\n",
+               "xfer=%s write/rank=%.1f MiB  rc=%d  %.2f s"
+               " (%.0f MiB/s aggregate)\n",
                argv[1], (unsigned long long)global, (unsigned long long)chunk,
-               libver.c_str(), (int)acorder, per * 8.0 / 1048576.0, (int)rc,
+               libver.c_str(), (int)acorder, indep ? "INDEPENDENT" : "collective",
+               per * 8.0 / 1048576.0, (int)rc,
                dt, global * 8.0 / 1048576.0 / (dt > 0 ? dt : 1e-9));
 
     H5Dclose(dset);
