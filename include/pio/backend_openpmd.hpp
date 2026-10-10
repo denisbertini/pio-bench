@@ -172,7 +172,7 @@ inline std::string chunk_opts(const char* backend,
         if (i) s += ',';
         s += std::to_string(chunk[i]);
     }
-    s += "]}}";
+    s += "]}}}";  // array + dataset + hdf5 + root objects
     return s;
 }
 
