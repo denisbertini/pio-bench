@@ -77,10 +77,20 @@ int main(int argc, char** argv) {
         }
     };
 
+    // LIFETIME (the very rule under investigation): storeChunk is
+    // non-owning, so every buffer handed to it must outlive the flush.
+    // All buffers therefore live HERE, in main scope -- a stage-local
+    // buffer destroyed before stage()'s flush reproduces the original
+    // bug in the repro itself (observed: SIGSEGV in
+    // ADIOI_GEN_WriteStrided, "Address not mapped").
+    const std::uint64_t n = 256;
+    std::vector<double> fbuf(n * n * n, 1.0);
+    std::vector<double> poscol(np, 0.5);
+    std::vector<double> masscol(np, 1.0);
+    std::vector<std::uint64_t> ids(np, 7);
+
     if (field) {
         stage("field rho", [&] {
-            const std::uint64_t n = 256;
-            std::vector<double> fbuf(n * n * n, 1.0);
             auto rho = iteration.meshes["field"]["rho"];
             rho.resetDataset(
                 om::Dataset(om::determineDatatype<double>(), {n, n, n}));
@@ -90,11 +100,10 @@ int main(int argc, char** argv) {
     auto species = iteration.particles["electrons"];
     if (pos) {
         stage("position/x (normal component)", [&] {
-            std::vector<double> col(np, 0.5);
             auto c = species["position"]["x"];
             c.resetDataset(
                 om::Dataset(om::determineDatatype<double>(), {np}));
-            c.storeChunk(col, {0}, {np});
+            c.storeChunk(poscol, {0}, {np});
         });
     }
     if (mass) {
@@ -107,17 +116,15 @@ int main(int argc, char** argv) {
                       om::RecordComponent mv(species["mass"]);
                       mv.makeConstant(1.0);
                   } else {
-                      std::vector<double> col(np, 1.0);
                       om::RecordComponent mv(species["mass"]);
                       mv.resetDataset(
                           om::Dataset(om::determineDatatype<double>(), {np}));
-                      mv.storeChunk(col, {0}, {np});
+                      mv.storeChunk(masscol, {0}, {np});
                   }
               });
     }
     if (id) {
         stage("id (scalar-view RecordComponent, uint64)", [&] {
-            std::vector<std::uint64_t> ids(np, 7);
             om::RecordComponent iv(species["id"]);
             iv.resetDataset(
                 om::Dataset(om::determineDatatype<std::uint64_t>(), {np}));
