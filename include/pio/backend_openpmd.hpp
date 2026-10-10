@@ -60,6 +60,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -134,10 +135,40 @@ inline ::openPMD::Series make_series(const std::filesystem::path& base,
 #ifdef PIO_PMD_LEGACY_CTOR
     const std::string engine =
         std::string_view(backend) == "adios2" ? "BP5" : "HDF5";
+    (void)std::getenv("PIOB_PMD_OPTS"); // passthrough needs the 0.17 options
+                                        // JSON; ignored on the legacy ctor
     return ::openPMD::Series(name, at, engine, comm);
 #else
-    return ::openPMD::Series(name, at, comm,
-                             std::string("{\"backend\":\"") + backend + "\"}");
+    // Series open options: backend selector + optional raw passthrough
+    // PIOB_PMD_OPTS='{"hdf5":{"vfd":{"type":"subfiling",...}}}' -- the
+    // escape hatch for every openPMD open-time knob (VFD/subfiling,
+    // dataset defaults, collective metadata...) without code churn.
+    // Must be a JSON OBJECT; merged after the backend key (which the
+    // passthrough may not override -- last-wins JSON parsing would let a
+    // stray "backend" key flip engines mid-benchmark).
+    std::string opts = std::string("{\"backend\":\"") + backend + "\"";
+    if (const char* extra = std::getenv("PIOB_PMD_OPTS"); extra && *extra) {
+        const std::string e = extra;
+        const std::size_t b = e.find_first_not_of(" \t\n\r"),
+                        f = e.find_last_not_of(" \t\n\r");
+        if (b == std::string::npos)
+            ; // whitespace-only: treat as unset
+        else if (e[b] != '{' || e[f] != '}' || f <= b)
+            throw std::runtime_error(
+                "PIOB_PMD_OPTS must be a JSON object, got: " + e);
+        else {
+            const std::string inner = e.substr(b + 1, f - b - 1);
+            if (inner.find_first_not_of(" \t\n\r") != std::string::npos) {
+                if (inner.find("\"backend\"") != std::string::npos)
+                    throw std::runtime_error(
+                        "PIOB_PMD_OPTS must not set \"backend\" (owned by "
+                        "--backend): " + e);
+                opts += "," + inner;
+            }
+        }
+    }
+    opts += "}";
+    return ::openPMD::Series(name, at, comm, opts);
 #endif
 }
 

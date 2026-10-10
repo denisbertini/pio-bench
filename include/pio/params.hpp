@@ -319,6 +319,8 @@ struct BenchConfig {
         // always disclosed -- a run must never hide its own config.
         if (const char* ph = std::getenv("PIOB_ROMIO_HINTS"); ph && *ph)
             os << " pio_hints=\"" << ph << "\"";
+        if (const char* po = std::getenv("PIOB_PMD_OPTS"); po && *po)
+            os << " pmd_opts=\"" << po << "\"";
         return os.str();
     }
 };

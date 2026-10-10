@@ -156,6 +156,17 @@ build, whereas the ROMIO_HINTS *file* was removed in ROMIO 3.2 and
 `MPI_Info_env` is an MPICH-family convention. The banner always echoes the
 injected value (`pio_hints="..."`) so no run hides its configuration.
 
+openPMD escape hatch: `PIOB_PMD_OPTS='{"hdf5":{...}}'` (a JSON object) is
+merged into the `pmd_*` Series open options, exposing every openPMD
+open-time knob without code changes — e.g. the HDF5 **subfiling VFD**
+(`{"hdf5":{"vfd":{"type":"subfiling","ioc_selection":"every_nth_rank",
+"stripe_count":-1}}}`).  It may not override `backend`; the banner echoes
+it (`pmd_opts="..."`).
+
+Fair-comparison script: `scripts/pmd_head2head.sh` runs all five backends
+back to back in one session, one shared striped directory, mean over 3
+checkpoints — the number to quote, not cross-run tables.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
