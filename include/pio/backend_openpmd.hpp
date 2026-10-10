@@ -28,7 +28,9 @@
 // READ_ONLY; determineDatatype<T>(); Offset/Extent (no Shape); raw-buffer
 // I/O via the contiguous-container storeChunk(vector&, ...) and
 // loadChunkRaw(T*, ...); scalar particle records reached through the
-// PatchRecordComponent(BaseRecord<...>) slicing-safe view ctor.
+// RecordComponent(BaseRecord<RecordComponent>) slicing-safe view ctor.  //
+// (0.17.1 fact: particle DATA records are plain Record; PatchRecord is
+//  patch metadata only.)
 #pragma once
 
 #include <cstdint>
@@ -137,7 +139,7 @@ public:
         // ---- particles: standard SoA species ------------------------------
         // Species records: [record][comp] is the data component; SCALAR
         // records (mass, id) are reached as component views via the
-        // slicing-safe PatchRecordComponent(BaseRecord) ctor.
+        // slicing-safe RecordComponent(BaseRecord) ctor.
         w.restart();
         const std::size_t n = parts.local_count();
         if (n > 0) {
@@ -158,7 +160,7 @@ public:
                         om::Dataset(om::determineDatatype<double>(), gcount));
                     comp.storeChunk(col, roff, lcount);
                 } else {
-                    om::PatchRecordComponent comp(rec);
+                    om::RecordComponent comp(rec);
                     comp.resetDataset(
                         om::Dataset(om::determineDatatype<double>(), gcount));
                     comp.storeChunk(col, roff, lcount);
@@ -168,7 +170,7 @@ public:
             std::vector<std::uint64_t> ids(n);
             for (std::size_t k = 0; k < n; ++k)
                 ids[k] = p[k].id;
-            om::PatchRecordComponent idrec(species["id"]);
+            om::RecordComponent idrec(species["id"]);
             idrec.resetDataset(
                 om::Dataset(om::determineDatatype<std::uint64_t>(), gcount));
             idrec.storeChunk(ids, roff, lcount);
@@ -233,12 +235,12 @@ public:
                 auto comp = rec[m.comp];
                 comp.loadChunkRaw(cols.back().data(), roff, lcount);
             } else {
-                om::PatchRecordComponent comp(rec);
+                om::RecordComponent comp(rec);
                 comp.loadChunkRaw(cols.back().data(), roff, lcount);
             }
         }
         std::vector<std::uint64_t> ids(n);
-        om::PatchRecordComponent idrec(species["id"]);
+        om::RecordComponent idrec(species["id"]);
         idrec.loadChunkRaw(ids.data(), roff, lcount);
         series.flush();
 

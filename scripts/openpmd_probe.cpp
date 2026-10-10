@@ -11,7 +11,7 @@
 // Exercises the EXACT call surface pio_bench's pmd_* backends use against
 // openPMD 0.17.x: Series(path, access, comm, options-JSON), Access::CREATE,
 // determineDatatype, mesh component storeChunk(vector&), scalar particle
-// records via the PatchRecordComponent(BaseRecord) view ctor, component
+// records via the RecordComponent(BaseRecord) view ctor, component
 // storeChunk + loadChunkRaw, flush. If this compiles and CMake still says
 // compiled-OUT, the CMake probe is broken -- not your openPMD.
 #include <openPMD/openPMD.hpp>
@@ -40,7 +40,7 @@ int main() {
 
     // particles: scalar record via component view, and component leaf
     auto scalar = it.particles["sp"]["mass"];
-    openPMD::PatchRecordComponent sc(scalar);
+    openPMD::RecordComponent sc(scalar);
     sc.resetDataset(openPMD::Dataset(openPMD::determineDatatype<double>(),
                                      openPMD::Extent{2}));
     sc.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});

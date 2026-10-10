@@ -167,7 +167,7 @@ int main() {
                                      openPMD::Extent{2}));
   comp.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
   auto scalar = it.particles[\"sp\"][\"mass\"];       // scalar record
-  openPMD::PatchRecordComponent sc(scalar);          // slicing-safe view
+  openPMD::RecordComponent sc(scalar);          // slicing-safe view
   sc.resetDataset(openPMD::Dataset(openPMD::determineDatatype<double>(),
                                    openPMD::Extent{2}));
   sc.storeChunk(buf, openPMD::Offset{0}, openPMD::Extent{2});
