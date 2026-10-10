@@ -26,6 +26,7 @@
 #include "pio/backend_adios2.hpp"
 #include "pio/backend_hdf5.hpp"
 #include "pio/backend_mpiio.hpp"
+#include "pio/backend_openpmd.hpp"
 #include "pio/domain.hpp"
 #include "pio/field.hpp"
 #include "pio/mpi.hpp"
@@ -38,11 +39,13 @@ namespace pio {
 /// Instrument version: stamped into every metrics line so fitness data
 /// always self-documents the binary that produced it (bump on ANY change
 /// that can move measured numbers; tag the repo in lockstep).
-inline constexpr const char* kBenchmarkVersion = "0.2.4";
+inline constexpr const char* kBenchmarkVersion = "0.3.0";
 
 static_assert(IoBackend<MpiIoBackend>);
 static_assert(IoBackend<Hdf5Backend>);
 static_assert(IoBackend<Adios2Backend>);
+static_assert(IoBackend<OpenPmdHdf5Backend>);
+static_assert(IoBackend<OpenPmdAdios2Backend>);
 
 template <IoBackend Backend>
 class PicBenchmark {

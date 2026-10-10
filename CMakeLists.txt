@@ -46,6 +46,7 @@ endif()
 # ---- optional backends (compile-time availability, cf. pio/backends.hpp) --
 option(PIO_WITH_HDF5  "Build the parallel HDF5 backend"  ON)
 option(PIO_WITH_ADIOS2 "Build the ADIOS2 (BP5) backend"  ON)
+option(PIO_WITH_OPENPMD "Build the openPMD-api backends (pmd_hdf5/pmd_adios2)" ON)
 
 if(PIO_WITH_HDF5)
   # Manual override for exotic/Debian-flavoured installs (e.g.
@@ -131,6 +132,39 @@ int main() {
     endif()
   else()
     message(STATUS "pio_bench: ADIOS2 not found -- backend compiled OUT")
+  endif()
+endif()
+
+if(PIO_WITH_OPENPMD)
+  find_package(openPMD CONFIG QUIET)
+  if(openPMD_FOUND AND TARGET openPMD::openPMD)
+    # openPMD's MPI support is a build option too -- probe the MPI-Series
+    # constructor directly (same probe-don't-guess rule as ADIOS2): a
+    # serial openPMD has no Series(path, access, engine, comm) overload.
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX openPMD::openPMD)
+    check_cxx_source_compiles("
+#include <openPMD/openPMD.hpp>
+#include <mpi.h>
+int main() {
+  openPMD::Series s(\"probe_only_unused\", openPMD::Access::Create,
+                    std::string(\"HDF5\"), MPI_COMM_WORLD);
+  (void)s.iterations[0];
+  return 0;
+}" PIO_OPENPMD_HAS_MPI)
+    set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)  # restore
+    if(PIO_OPENPMD_HAS_MPI)
+      target_compile_definitions(pio_bench PRIVATE PIO_HAVE_OPENPMD=1)
+      target_link_libraries(pio_bench PRIVATE openPMD::openPMD)
+      message(STATUS "pio_bench: openPMD backend ON (pmd_hdf5 + pmd_adios2, "
+                     "MPI-enabled openPMD detected)")
+    else()
+      message(STATUS "pio_bench: openPMD found but WITHOUT usable MPI ctor -- "
+                     "pmd_* backends compiled OUT (rebuild openPMD with "
+                     "-DopenPMD_USE_MPI=ON)")
+    endif()
+  else()
+    message(STATUS "pio_bench: openPMD not found -- pmd_* backends compiled OUT")
   endif()
 endif()
 

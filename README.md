@@ -9,6 +9,16 @@ selectable backends:
 | `mpiio`  | MPI-IO (ROMIO hints) | `.bin` |
 | `hdf5`   | Parallel HDF5        | `.h5`  |
 | `adios2` | ADIOS2 BP5           | `.bp`  |
+| `pmd_hdf5`   | openPMD-api → HDF5 | `.h5`  |
+| `pmd_adios2` | openPMD-api → BP5  | `.bp`  |
+
+The `pmd_*` backends write the **standard openPMD data model** (mesh
+record `field/rho` + species `electrons` with SoA `position/momentum/mass/
+id`) — production PIC checkpoint semantics, still bit-exactly verified.
+The AoS→SoA transpose is timed inside the particle window; the field/
+particle split uses two incremental flushes (openPMD stores are lazy, so
+flush time is honestly attributed and `iteration.close()` stays outside
+both windows).
 
 ## What it measures
 

@@ -23,7 +23,7 @@
 
 namespace pio {
 
-enum class BackendKind { Mpiio, Hdf5, Adios2 };
+enum class BackendKind { Mpiio, Hdf5, Adios2, PmdHdf5, PmdAdios2 };
 
 inline std::string_view to_string(BackendKind b) {
     switch (b) {
@@ -33,6 +33,10 @@ inline std::string_view to_string(BackendKind b) {
         return "hdf5";
     case BackendKind::Adios2:
         return "adios2";
+    case BackendKind::PmdHdf5:
+        return "pmd_hdf5";
+    case BackendKind::PmdAdios2:
+        return "pmd_adios2";
     }
     return "?";
 }
@@ -44,6 +48,10 @@ inline std::optional<BackendKind> backend_from_string(std::string_view s) {
         return BackendKind::Hdf5;
     if (s == "adios2" || s == "bp5")
         return BackendKind::Adios2;
+    if (s == "pmd_hdf5" || s == "openpmd-hdf5")
+        return BackendKind::PmdHdf5;
+    if (s == "pmd_adios2" || s == "openpmd-adios2" || s == "pmd_bp5")
+        return BackendKind::PmdAdios2;
     return std::nullopt;
 }
 
@@ -141,7 +149,8 @@ struct BenchConfig {
         "  --ghost N              ghost cells per side            (1)\n"
         "  --particles N          particles per rank (suffix ok)  (100k->100000)\n"
         "  --seed N               RNG seed                        (42)\n"
-        "  --backend NAME         mpiio | hdf5 | adios2           (mpiio)\n"
+        "  --backend NAME         mpiio | hdf5 | adios2 | pmd_hdf5 |\n"
+        "                         pmd_adios2  (pmd_* = openPMD-api)  (mpiio)\n"
         "  --dir PATH             output directory                (.)\n"
         "  --aggregators N        cb_nodes / NumAggregators       (ROMIO default)\n"
         "  --buffer SIZE          cb_buffer_size / BufferVSize,   (library default)\n"
@@ -212,7 +221,7 @@ struct BenchConfig {
                 auto b = backend_from_string(v);
                 if (!b)
                     throw ParseError("unknown --backend '" + std::string(v) +
-                                     "' (mpiio|hdf5|adios2)");
+                                     "' (mpiio|hdf5|adios2|pmd_hdf5|pmd_adios2)");
                 cfg.backend = *b;
             } else if (key == "dir") {
                 cfg.dir = std::string(need_value(i, key));

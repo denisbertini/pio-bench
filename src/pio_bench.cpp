@@ -55,6 +55,12 @@ int main(int argc, char** argv) {
         case BackendKind::Adios2:
             rc = run_selected<Adios2Backend>(cfg);
             break;
+        case BackendKind::PmdHdf5:
+            rc = run_selected<OpenPmdHdf5Backend>(cfg);
+            break;
+        case BackendKind::PmdAdios2:
+            rc = run_selected<OpenPmdAdios2Backend>(cfg);
+            break;
         }
     } catch (const std::exception& e) {
         std::cerr << "-E- : [" << rank_of(MPI_COMM_WORLD) << "] " << e.what() << "\n";
