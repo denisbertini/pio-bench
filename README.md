@@ -93,6 +93,23 @@ Backends absent from the build report `SKIPPED`, not failure. Tunables:
   carries no block statistics (affects later query/transform tools, not reads).
 * With `ghost > 0` the ADIOS2 backend gathers the field interior into a
   temporary block (BP5 `Put` requires contiguous data).
+* `pmd_*` write path is the canonical openPMD pattern (mirrors
+  examples/8a + 3b at 0.17.1): owning `shared_ptr` `storeChunk`, scalar
+  records used directly on the Record (`BaseRecord` IS-A `RecordComponent`),
+  standard `positionOffset` constants, single flush at `iteration.close()`
+  (`--pmd-split` opts into the two-flush phase timing).
+* `pmd_hdf5` throughput attribution, Lustre/Virgo, 32 ranks, 11.9 GiB /
+  checkpoint (each step measured, verified clean): 311 MiB/s library
+  defaults -> 625 with RANK-ALIGNED CHUNKS (default `pmd_chunks=rank`;
+  openPMD's auto-chunker caps at 4 MiB and shatters the per-rank brick)
+  -> 1200 writing into a directory striped with `lfs setstripe -c 8`.
+  A single file lands on ONE OST, so unstriped output is capped at one
+  target's rate regardless of rank count -- the checkpoint-directory
+  stripe policy is the harness contract (see Integration), not an
+  application knob.  `HDF5_USE_FILE_LOCKING=FALSE` adds ~19% more for
+  write-then-read-only runs in one MPI job (matrix:
+  `scripts/pmd_env_matrix.sh`).  `pmd_adios2` sidesteps all of this by
+  design (per-writer files fan out across OSTs by themselves).
 
 ## Integration (mpiio_evolve)
 
