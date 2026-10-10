@@ -33,10 +33,13 @@ struct IoSettings {
     bool collective_buffering{true};
     bool h5_prepack{true};  // hdf5: gather members before H5Dwrite (cf. --h5-strided)
     bool adi_stats{true};   // adios2: BP5 per-block stats (cf. --no-adi-stats)
+    bool pmd_split{true};   // pmd_*: two incremental flushes -> real phase split
+                            // (false = single flush, split reported as 0; cf.
+                            // --pmd-single-flush crash bisection)
 
     static IoSettings from(const BenchConfig& c) {
         return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
-                          c.h5_prepack, c.adi_stats};
+                          c.h5_prepack, c.adi_stats, c.pmd_split};
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.

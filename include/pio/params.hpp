@@ -127,6 +127,7 @@ struct BenchConfig {
     bool h5_prepack{true};                     // hdf5: contiguous staging writes
                                                // (false = in-library strided)
     bool adi_stats{true};                      // adios2: BP5 per-block statistics
+    bool pmd_split{true};                      // pmd_*: incremental-flush phase split
                                                // (false = StatsLevel=0, skip the
                                                //  min/max/sum pass over all data)
 
@@ -160,6 +161,9 @@ struct BenchConfig {
         "                         (default: pre-packed contiguous writes)\n"
         "  --no-adi-stats         adios2: BP5 StatsLevel=0 (skip per-block\n"
         "                         min/max/sum statistics of every written block)\n"
+        "  --pmd-single-flush     pmd_*: ONE flush per checkpoint (phase split\n"
+        "                         reported as 0; crash bisection of the\n"
+        "                         incremental-flush pattern)\n"
         "  --steps N              timesteps                       (10)\n"
         "  --interval N           checkpoint every N steps        (1)\n"
         "  --max-checkpoints N    cap checkpoints, -1 unlimited   (-1)\n"
@@ -235,6 +239,8 @@ struct BenchConfig {
                 cfg.h5_prepack = false;
             } else if (key == "no-adi-stats") {
                 cfg.adi_stats = false;
+            } else if (key == "pmd-single-flush") {
+                cfg.pmd_split = false;
             } else if (key == "steps") {
                 cfg.steps = static_cast<int>(detail::parse_ll(need_value(i, key), key));
             } else if (key == "interval") {
@@ -293,6 +299,8 @@ struct BenchConfig {
             os << " h5_write=" << (h5_prepack ? "prepack" : "strided");
         if (backend == BackendKind::Adios2)
             os << " adi_stats=" << (adi_stats ? "on" : "off");
+        if (backend == BackendKind::PmdHdf5 || backend == BackendKind::PmdAdios2)
+            os << " pmd_split=" << (pmd_split ? "on" : "off");
         // Audit: externally injected ROMIO hints (harness channel) are
         // always disclosed -- a run must never hide its own config.
         if (const char* ph = std::getenv("PIOB_ROMIO_HINTS"); ph && *ph)

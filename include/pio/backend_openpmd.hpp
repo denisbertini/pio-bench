@@ -73,12 +73,18 @@ inline constexpr SoaMember members[] = {
 inline ::openPMD::Series make_series(const std::filesystem::path& base,
                                      const char* backend,
                                      ::openPMD::Access at, MPI_Comm comm) {
+    // Give openPMD the resolved filename outright (base + engine suffix):
+    // an extension-less name works via the backend JSON but makes ADIOS2
+    // emit one "No file ending specified" warning per rank per Series --
+    // and leaves the on-disk name implicit. Explicit is quieter and clearer.
+    const std::string name =
+        base.string() + (std::string_view(backend) == "adios2" ? ".bp" : ".h5");
 #ifdef PIO_PMD_LEGACY_CTOR
     const std::string engine =
         std::string_view(backend) == "adios2" ? "BP5" : "HDF5";
-    return ::openPMD::Series(base.string(), at, engine, comm);
+    return ::openPMD::Series(name, at, engine, comm);
 #else
-    return ::openPMD::Series(base.string(), at, comm,
+    return ::openPMD::Series(name, at, comm,
                              std::string("{\"backend\":\"") + backend + "\"}");
 #endif
 }
@@ -133,8 +139,10 @@ public:
         auto rho = mesh["rho"];
         rho.resetDataset(om::Dataset(om::determineDatatype<double>(), gsz));
         rho.storeChunk(fbuf, st, lsz); // contiguous-container overload
-        series.flush();
-        split.field_seconds = w.elapsed();
+        if (settings_.pmd_split) {
+            series.flush();
+            split.field_seconds = w.elapsed();
+        }
 
         // ---- particles: standard SoA species ------------------------------
         // Species records: [record][comp] is the data component; SCALAR
@@ -175,8 +183,17 @@ public:
                 om::Dataset(om::determineDatatype<std::uint64_t>(), gcount));
             idrec.storeChunk(ids, roff, lcount);
         }
-        series.flush();
-        split.particle_seconds = w.elapsed();
+        if (settings_.pmd_split) {
+            series.flush();
+            split.particle_seconds = w.elapsed();
+        } else {
+            // single-flush diagnostic mode: ONE flush per checkpoint; the
+            // phase split is honestly reported as unavailable (zeros) --
+            // the wall total in benchmark.hpp remains exact. Used to
+            // bisect whether the incremental-flush pattern itself is the
+            // pmd_* crash trigger.
+            series.flush();
+        }
 
         iteration.close(); // metadata finalization, outside both windows
         return split;
