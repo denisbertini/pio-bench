@@ -103,11 +103,11 @@ one session, mean of 3 checkpoints):
 
 | backend | MiB/s |
 |---|---|
-| **pmd_hdf5** (rank-aligned chunks) | **1214** |
-| adios2 | 1097 |
-| mpiio | 1079 |
-| hdf5 (raw) | 1032 |
-| pmd_adios2 | 985 |
+| **pmd_hdf5** (rank-aligned chunks) | **1268** |
+| hdf5 (raw) | 1099 |
+| mpiio | 1071 |
+| adios2 | 1013 |
+| pmd_adios2 | 955 |
 
 The standard openPMD model costs nothing at production write sizes:
 `pmd_hdf5` beats the hand-written raw HDF5 path by ~18% under identical
