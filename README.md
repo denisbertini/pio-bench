@@ -119,6 +119,17 @@ head2head numbers.
 
 * Field values are the flattened global index; particle `id`s are the
   globally unique merged index — both cheap to verify independently.
+* The `mpiio` backend uses ONE file view per checkpoint (was two): the
+  freshly opened file's default byte view already addresses the particle
+  records, so they go in via a collective `MPI_File_write_at_all` at each
+  rank's byte displacement — no `set_view`; a single `set_view` then
+  switches to the 3-D field subarray. The subarray datatypes are cached
+  across checkpoints. Counts use the MPI-4.0 64-bit count API when the
+  stack provides it (probed in CMake against the actual prototypes — some
+  builds define the `MPI_Count` typedef while keeping `int` MPI-IO
+  prototypes, which a naive `#ifdef` would truncate silently); on int-count
+  stacks the per-rank particle count is capped at 2^31 records (≈128 GiB)
+  with a loud error, not a silent overflow.
 * MPI-IO writes particles directly from the in-memory array of structs
   (MPI derived record type, zero copies). HDF5 stores per-member datasets:
   by default each member is pre-packed into a contiguous staging vector
