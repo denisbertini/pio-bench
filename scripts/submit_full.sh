@@ -23,6 +23,8 @@ export APPTAINER_BINDPATH=/lustre/rz/dbertini2
 export APPTAINER_SHARENS=true
 export APPTAINER_CONFIGDIR=/tmp/$USER
 export OMPI_MCA_io=romio341
+# cluster-tuned default (cf. the 32-rank table): the MDS lock tax is ~19%
+export HDF5_USE_FILE_LOCKING=FALSE
 
 A=/lustre/rz/dbertini2/pio-bench/scripts/
 cd $A || exit 1
