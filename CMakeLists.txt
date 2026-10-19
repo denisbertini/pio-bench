@@ -43,6 +43,52 @@ if(NOT PIO_MPI_SUBARRAY_INT)
   target_compile_definitions(pio_bench PRIVATE PIO_MPI_SUBARRAY_AINT=1)
 endif()
 
+# 64-bit counts for the MPI-IO collective _at_ calls (MPI-4.0 MPI_Count).
+# Two layouts exist in the wild:
+#   * MPICH 4.1+: original prototypes keep `int count` and a parallel
+#     `MPI_File_write_at_all_c(..., MPI_Count, ...)` family exists.
+#   * MPI-4.0-converted stacks: the original prototypes take MPI_Count.
+# The probe must key off the PROTOTYPE signature, not the MPI_Count
+# typedef: some builds (e.g. Open MPI 5.0.x) define the typedef while
+# keeping the int prototypes -- an MPI_Count argument there compiles but
+# truncates to 32 bits at runtime (silent data loss past 2^31 records).
+# For the converted-prototype form we therefore compare function-pointer
+# types instead of making a plain call (a long long-to-int call is legal
+# C++ and would pass a plain-call probe for the wrong reason).
+# No backslashes in either probe source (check_cxx_source_compiles macro
+# escaping, cf. the openPMD probe below).
+set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)
+check_cxx_source_compiles("
+#include <mpi.h>
+int main() {
+  MPI_File fh; char buf[8];
+  MPI_File_write_at_all_c(fh, 0, buf, (MPI_Count)1, MPI_BYTE, MPI_STATUS_IGNORE);
+  MPI_File_read_at_all_c(fh, 0, buf, (MPI_Count)1, MPI_BYTE, MPI_STATUS_IGNORE);
+  return 0;
+}" PIO_MPI_FILE_COUNT_C)
+if(NOT PIO_MPI_FILE_COUNT_C)
+  check_cxx_source_compiles("
+#include <mpi.h>
+int main() {
+  int (*w)(MPI_File, MPI_Offset, const void*, MPI_Count, MPI_Datatype, MPI_Status*)
+      = MPI_File_write_at_all;
+  int (*r)(MPI_File, MPI_Offset, void*, MPI_Count, MPI_Datatype, MPI_Status*)
+      = MPI_File_read_at_all;
+  (void)w; (void)r;
+  return 0;
+}" PIO_MPI_FILE_COUNT)
+endif()
+set(CMAKE_REQUIRED_LIBRARIES MPI::MPI_CXX)  # restore
+if(PIO_MPI_FILE_COUNT_C)
+  target_compile_definitions(pio_bench PRIVATE PIO_MPI_FILE_COUNT_C=1)
+  message(STATUS "pio_bench: MPI-IO count API = MPI_Count via the _c family -- detected, handled")
+elseif(PIO_MPI_FILE_COUNT)
+  target_compile_definitions(pio_bench PRIVATE PIO_MPI_FILE_COUNT=1)
+  message(STATUS "pio_bench: MPI-IO count API = MPI_Count (converted prototypes) -- detected, handled")
+else()
+  message(STATUS "pio_bench: MPI-IO count API = int (MPI-3 style) -- detected, handled")
+endif()
+
 # ---- optional backends (compile-time availability, cf. pio/backends.hpp) --
 option(PIO_WITH_HDF5  "Build the parallel HDF5 backend"  ON)
 option(PIO_WITH_ADIOS2 "Build the ADIOS2 (BP5) backend"  ON)

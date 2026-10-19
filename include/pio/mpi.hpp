@@ -183,6 +183,53 @@ private:
     MPI_Datatype type_{MPI_DATATYPE_NULL};
 };
 
+// ------------------------------------------------------ MPI-IO counts ----
+// 64-bit counts for the collective _at_ calls when the stack supports
+// them. Two layouts exist (both probed in CMake, cf. the status lines):
+//   * PIO_MPI_FILE_COUNT_C: MPICH 4.1+ style -- original prototypes keep
+//     `int count`, a parallel `..._c` family takes MPI_Count.
+//   * PIO_MPI_FILE_COUNT: MPI-4.0-converted prototypes (MPI_Count count).
+//   * neither: MPI-3 style -- count is int, and per-rank record counts
+//     above INT_MAX are rejected loudly (see the backends), not truncated.
+// The guards key off the PROTOTYPE signature, not the MPI_Count typedef:
+// some builds define the typedef while keeping the int prototypes, and
+// there an MPI_Count argument compiles but truncates to 32 bits at
+// runtime -- exactly what a naive `#ifdef MPI_Count` would ship.
+#ifdef PIO_MPI_FILE_COUNT_C
+using FileCount = MPI_Count;
+inline int file_write_at_all(MPI_File fh, MPI_Offset off, const void* buf,
+                             MPI_Count cnt, MPI_Datatype dt) {
+    return MPI_File_write_at_all_c(fh, off, buf, cnt, dt, MPI_STATUS_IGNORE);
+}
+inline int file_read_at_all(MPI_File fh, MPI_Offset off, void* buf,
+                            MPI_Count cnt, MPI_Datatype dt) {
+    return MPI_File_read_at_all_c(fh, off, buf, cnt, dt, MPI_STATUS_IGNORE);
+}
+#elif defined(PIO_MPI_FILE_COUNT)
+using FileCount = MPI_Count;
+inline int file_write_at_all(MPI_File fh, MPI_Offset off, const void* buf,
+                             MPI_Count cnt, MPI_Datatype dt) {
+    return MPI_File_write_at_all(fh, off, buf, cnt, dt, MPI_STATUS_IGNORE);
+}
+inline int file_read_at_all(MPI_File fh, MPI_Offset off, void* buf,
+                            MPI_Count cnt, MPI_Datatype dt) {
+    return MPI_File_read_at_all(fh, off, buf, cnt, dt, MPI_STATUS_IGNORE);
+}
+#else
+using FileCount = int;
+inline int file_write_at_all(MPI_File fh, MPI_Offset off, const void* buf,
+                             int cnt, MPI_Datatype dt) {
+    return MPI_File_write_at_all(fh, off, buf, cnt, dt, MPI_STATUS_IGNORE);
+}
+inline int file_read_at_all(MPI_File fh, MPI_Offset off, void* buf,
+                            int cnt, MPI_Datatype dt) {
+    return MPI_File_read_at_all(fh, off, buf, cnt, dt, MPI_STATUS_IGNORE);
+}
+#endif
+inline FileCount max_file_count() {
+    return (std::numeric_limits<FileCount>::max)();
+}
+
 // --------------------------------------------------------------- File ----
 /// RAII MPI_File (collective open; close in dtor unless released).
 class File {
