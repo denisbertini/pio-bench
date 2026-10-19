@@ -9,8 +9,9 @@
 #SBATCH --error=pio-bench_%j.err
 # submit_full.sh -- the 128-rank matrix in ONE sbatch job, so every number
 # is a back-to-back (within-session) comparison:
-#   round 1 (default placement, data files land single-OST):
-#     hdf5 (rank chunks) | hdf5 --h5-auto-chunks (A/B) | mpiio | pmd_hdf5 | adios2
+#   round 1 (default placement, data files land single-OST) -- all five
+#     backends: hdf5 (rank chunks), hdf5 --h5-auto-chunks (A/B), mpiio,
+#     pmd_hdf5, adios2, pmd_adios2
 #   round 2 (pre-created files, lfs setstripe -c 16):
 #     mpiio | hdf5 | pmd_hdf5
 # Usage: sbatch scripts/submit_full.sh
@@ -36,8 +37,11 @@ srun --export=ALL apptainer exec $CONT bash -c "$B --backend hdf5     $C --h5-au
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend mpiio    $C"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend pmd_hdf5 $C"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend adios2   $C"
+srun --export=ALL apptainer exec $CONT bash -c "$B --backend pmd_adios2 $C"
 
 # ---- round 2: pre-create + 16-stripe the shared files ----------------
+# (pmd_adios2 has no round-2 entry on purpose: BP5 mints its own
+#  per-writer files, placed by the MDS -- pre-creation does not apply)
 for i in 1 2 3; do
   f="r2/chkpt_$(printf %06d $i)_step_$(printf %06d $i)"
   : > "$f.bin"; lfs setstripe -c 16 "$f.bin"
