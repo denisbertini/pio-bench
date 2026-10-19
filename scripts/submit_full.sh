@@ -32,7 +32,11 @@ mkdir -p r1 r2
 B=../build/pio_bench
 # --verify runs AFTER the measured window (write stopwatch stops at the
 # completion barrier), so it costs job wall time, not benchmark numbers.
-C="--dir ${A}/r1 --local 256 --particles 4000000 --steps 3 --keep-files --verify"
+# (C2 is BUILT, not string-substituted: ${C/pat/rep} splits at literal '/'
+#  in the source, and $A is full of slashes -- the old substitution
+#  produced "r1/--dir ..." and killed round 2.)
+O="--local 256 --particles 4000000 --steps 3 --keep-files --verify"
+C="--dir ${A}/r1 $O"
 
 # ---- round 1: default placement (files land stripe-1) ----------------
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend hdf5     $C"
@@ -47,10 +51,11 @@ srun --export=ALL apptainer exec $CONT bash -c "$B --backend pmd_adios2 $C"
 #  per-writer files, placed by the MDS -- pre-creation does not apply)
 for i in 1 2 3; do
   f="r2/chkpt_$(printf %06d $i)_step_$(printf %06d $i)"
+  rm -f "$f.bin" "$f.h5"  # fresh files: setstripe refuses to re-stripe
   : > "$f.bin"; lfs setstripe -c 16 "$f.bin"
   : > "$f.h5";  lfs setstripe -c 16 "$f.h5"
 done
-C2="${C/--dir $A/r1/--dir $A/r2}"
+C2="--dir ${A}/r2 $O"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend mpiio    $C2"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend hdf5     $C2"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend pmd_hdf5 $C2"
