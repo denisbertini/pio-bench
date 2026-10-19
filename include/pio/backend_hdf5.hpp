@@ -27,8 +27,13 @@
 //     (uniform by construction here; the reduction makes it safe). One
 //     chunk per rank column.
 // Chunks above 1 GiB fall back to the default layout (defensive cap, cf.
-// the openPMD backend). `--h5-auto-chunks` restores the H5P_DEFAULT layout
-// for A/B: different file layout, identical data (verify covers both).
+// the openPMD backend). `--h5-auto-chunks` restores the default (no chunk)
+// layout for A/B: different file layout, identical data (verify covers
+// both). Note the dcpl is always passed as a real H5P_DATASET_CREATE list
+// or the H5P_DEFAULT macro itself -- since HDF5 1.14, H5P_DEFAULT is 0,
+// not H5I_INVALID_HID (-1), so the H5PropObj wrapper's empty state must
+// never be passed as a property list (it fails H5P_isa_class; the first
+// 0.5.0 cut crashed in --h5-auto-chunks mode on HDF5 2.2.0 this way).
 //
 // NOTE (bug fixed vs old ci_pic_chkpt::p_write_hdf5): the old code passed
 // a simple local-dims memspace together with an &arr[g][g][g] pointer,
@@ -165,11 +170,18 @@ public:
             detail::h5_check(H5Pset_chunk(*fdcpl, 3, fchunk), "field dcpl chunk");
         }
 
+        // WARNING: the dcpl argument must be a REAL property list or the
+        // H5P_DEFAULT MACRO -- never the wrapper's empty state. Since
+        // HDF5 1.14, H5P_DEFAULT is 0, not H5I_INVALID_HID (-1): the
+        // wrapper's id_ == -1 reaches H5P_isa_class() and fails with
+        // "not a property list" (the first 0.5.0 cut crashed its
+        // --h5-auto-chunks mode on the cluster's HDF5 2.2.0 build).
         Stopwatch w;
         {
             detail::H5SpaceObj filespace{H5Screate_simple(3, gdims, nullptr)};
             detail::H5DsetObj dset{H5Dcreate(*file, "/fields/data", H5T_NATIVE_DOUBLE,
-                                             *filespace, *lcpl, *fdcpl,
+                                             *filespace, *lcpl,
+                                             use_fchunk ? *fdcpl : H5P_DEFAULT,
                                              H5P_DEFAULT)};
             detail::H5SpaceObj fsub{H5Dget_space(*dset)};
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, start, nullptr,
@@ -250,8 +262,12 @@ public:
         auto write_member = [&](const char* dset_name, hid_t h5type,
                                 const void* mem_ptr, bool contiguous_mem) {
             detail::H5SpaceObj filespace{H5Screate_simple(1, &pgcount, nullptr)};
+            // dcpl: real list or the H5P_DEFAULT macro (never *pdcpl's
+            // empty state -- see the field-write warning above)
             detail::H5DsetObj dset{H5Dcreate(*file, dset_name, h5type, *filespace,
-                                             *lcpl, *pdcpl, H5P_DEFAULT)};
+                                             *lcpl,
+                                             use_pchunk ? *pdcpl : H5P_DEFAULT,
+                                             H5P_DEFAULT)};
             detail::H5SpaceObj fsub{H5Dget_space(*dset)};
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, &pstart,
                                                  nullptr, &pcount, nullptr),
