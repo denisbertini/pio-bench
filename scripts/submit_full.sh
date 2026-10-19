@@ -26,7 +26,9 @@ export OMPI_MCA_io=romio341
 cd /lustre/rz/dbertini2/pio-bench || exit 1
 mkdir -p r1 r2
 B=build/pio_bench
-C="--dir r1 --local 256 --particles 4000000 --steps 3 --keep-files"
+# --verify runs AFTER the measured window (write stopwatch stops at the
+# completion barrier), so it costs job wall time, not benchmark numbers.
+C="--dir r1 --local 256 --particles 4000000 --steps 3 --keep-files --verify"
 
 # ---- round 1: default placement (files land stripe-1) ----------------
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend hdf5     $C"
