@@ -14,6 +14,22 @@
 //     doubles) and let its generic selection machinery walk it element by
 //     element. Kept to MEASURE the conversion cost, not to use.
 //
+// Dataset chunking: RANK-ALIGNED by default (the pmd_hdf5 pattern -- the
+// openPMD backend does the same, and scripts/pmd_env_matrix.sh measured the
+// chunk-layout axis at ~2x on Lustre):
+//   * /fields/data : chunk = (lx, ly, lz) -- the whole per-rank brick is
+//     ONE chunk: a contiguous on-disk extent, no chunk shared between
+//     ranks. The old H5P_DEFAULT dcpl (contiguous layout) scatters each
+//     brick into small runs inside one data object (z-fastest C order) --
+//     the same pattern the raw C-order file pays in the mpiio backend.
+//   * particles/*  : chunk = MIN of the per-rank counts. The chunk grid
+//     defines the SHARED dataset, so the extent must agree on every rank
+//     (uniform by construction here; the reduction makes it safe). One
+//     chunk per rank column.
+// Chunks above 1 GiB fall back to the default layout (defensive cap, cf.
+// the openPMD backend). `--h5-auto-chunks` restores the H5P_DEFAULT layout
+// for A/B: different file layout, identical data (verify covers both).
+//
 // NOTE (bug fixed vs old ci_pic_chkpt::p_write_hdf5): the old code passed
 // a simple local-dims memspace together with an &arr[g][g][g] pointer,
 // which silently wrote wrong data whenever ghost > 0 (interior rows are
@@ -23,6 +39,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -45,6 +62,11 @@ inline void h5_check(herr_t rc, const char* what) {
     if (rc < 0)
         throw std::runtime_error(std::string("HDF5 failure: ") + what);
 }
+
+/// Defensive cap for rank-aligned chunks (cf. the openPMD backend): above
+/// this a single chunk would be absurdly large; fall back to the default
+/// layout instead.
+inline constexpr std::uint64_t kH5ChunkBytesCap = 1ull << 30;  // 1 GiB
 
 /// RAII for hid_t families (all closed by their *close(hid_t)).
 template <auto (*CloseFn)(hid_t)>
@@ -130,11 +152,24 @@ public:
         detail::h5_check(H5Pset_create_intermediate_group(*lcpl, 1),
                          "link create intermediate group");
 
+        // Rank-aligned field chunk: the whole per-rank brick is one chunk.
+        const hsize_t fchunk[3] = {hsize_t(d.local[0]), hsize_t(d.local[1]),
+                                   hsize_t(d.local[2])};
+        const bool use_fchunk =
+            settings_.h5_rank_chunks &&
+            std::uint64_t(d.local[0]) * d.local[1] * d.local[2] * sizeof(double) <=
+                detail::kH5ChunkBytesCap;
+        detail::H5PropObj fdcpl;
+        if (use_fchunk) {
+            fdcpl = detail::H5PropObj{H5Pcreate(H5P_DATASET_CREATE)};
+            detail::h5_check(H5Pset_chunk(*fdcpl, 3, fchunk), "field dcpl chunk");
+        }
+
         Stopwatch w;
         {
             detail::H5SpaceObj filespace{H5Screate_simple(3, gdims, nullptr)};
             detail::H5DsetObj dset{H5Dcreate(*file, "/fields/data", H5T_NATIVE_DOUBLE,
-                                             *filespace, *lcpl, H5P_DEFAULT,
+                                             *filespace, *lcpl, *fdcpl,
                                              H5P_DEFAULT)};
             detail::H5SpaceObj fsub{H5Dget_space(*dset)};
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, start, nullptr,
@@ -157,6 +192,24 @@ public:
         const hsize_t pcount = hsize_t(parts.local_count());
         const hsize_t one = 1;
         const hsize_t stride = sizeof(Particle) / sizeof(double); // 8
+
+        // Rank-aligned particle chunk: MIN of the per-rank counts -- the
+        // chunk grid defines the shared dataset, so the extent must be
+        // identical on every rank (uniform here by construction; the
+        // reduction makes it safe). COLLECTIVE: outside any per-rank guard.
+        std::uint64_t pcmin = 0;
+        const std::uint64_t pc = static_cast<std::uint64_t>(parts.local_count());
+        PIO_MPI(MPI_Allreduce(&pc, &pcmin, 1, MPI_UINT64_T, MPI_MIN, comm_));
+        const bool use_pchunk =
+            settings_.h5_rank_chunks && pcmin > 0 &&
+            pcmin <= parts.global_count() &&
+            pcmin * sizeof(double) <= detail::kH5ChunkBytesCap;
+        detail::H5PropObj pdcpl;
+        if (use_pchunk) {
+            const hsize_t pchunk = hsize_t(pcmin);
+            pdcpl = detail::H5PropObj{H5Pcreate(H5P_DATASET_CREATE)};
+            detail::h5_check(H5Pset_chunk(*pdcpl, 1, &pchunk), "particle dcpl chunk");
+        }
         // The strided selection must FIT the memory dataspace: use the
         // standard AoS trick -- a virtual extent of pcount*stride elements
         // (the full record span) and stride through it picking members.
@@ -198,7 +251,7 @@ public:
                                 const void* mem_ptr, bool contiguous_mem) {
             detail::H5SpaceObj filespace{H5Screate_simple(1, &pgcount, nullptr)};
             detail::H5DsetObj dset{H5Dcreate(*file, dset_name, h5type, *filespace,
-                                             *lcpl, H5P_DEFAULT, H5P_DEFAULT)};
+                                             *lcpl, *pdcpl, H5P_DEFAULT)};
             detail::H5SpaceObj fsub{H5Dget_space(*dset)};
             detail::h5_check(H5Sselect_hyperslab(*fsub, H5S_SELECT_SET, &pstart,
                                                  nullptr, &pcount, nullptr),
