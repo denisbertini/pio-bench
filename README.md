@@ -77,6 +77,8 @@ HDF5_USE_FILE_LOCKING=FALSE mpirun -n 32 ./build/pio_bench \
 `pmd_hdf5` knobs: `pmd_chunks=rank` (default) aligns each dataset chunk
 with the per-rank box (openPMD's auto-chunker caps at 4 MiB and shatters
 the brick); `--pmd-auto-chunks` restores the library default for A/B.
+The raw `hdf5` backend uses the same rank-aligned chunking by default
+since 0.5.0; `--h5-auto-chunks` restores the old contiguous layout for A/B.
 
 Under Darshan:
 
@@ -137,6 +139,16 @@ head2head numbers.
   AoS stride pattern, producing byte-identical files — the gap between
   the two quantifies the in-library conversion cost. ADIOS2 pre-packs
   per member into explicit global-shape variables.
+* The `hdf5` backend chunks its datasets rank-aligned by default since
+  0.5.0: the field chunk is the per-rank brick (one contiguous on-disk
+  chunk per rank) and each particle-column chunk is the min per-rank
+  count (one chunk per rank) — the `pmd_hdf5` pattern. `scripts/
+  pmd_env_matrix.sh` measured the chunk-layout axis at ~2x on Lustre,
+  which the raw backend had never received: with the old `H5P_DEFAULT`
+  dcpl (contiguous layout) each hyperslab write scatters its brick into
+  small z-fastest runs inside one data object — the same pattern the
+  mpiio backend's C-order file pays. `--h5-auto-chunks` restores the old
+  layout for A/B; the files hold identical data either way.
 * ADIOS2/BP5 computes per-block min/max/sum statistics on every `Put` by
   default (StatsLevel 2) — a full extra pass over the payload on the writer
   CPU, the leading suspect for BP5's write-rate gap vs. raw MPI-IO.
