@@ -123,6 +123,13 @@ single-OST output dir, one job via `scripts/submit_all.sh` (every leg
 | mpiio | 1646 |
 | hdf5 | 1579 |
 
+The spread is data layout, not engine speed. `adios2` and the `pmd_*`
+backends re-pack each rank's field brick into one contiguous block (and
+add their own aggregation); the raw `mpiio`/`hdf5` backends write the
+brick strided into a shared C-order object (no re-pack). On Lustre the
+contiguous-block pattern beats the strided scatter by ~1.4x -- and it is
+access-bound, not placement-bound (striping barely moved `mpiio`).
+
 Cross-run tables on a shared system mislead (earlier ones ranked these
 engines in nearly the opposite order) -- quote only head2head numbers.
 
