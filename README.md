@@ -80,16 +80,18 @@ lfs getstripe chkpts/* | grep stripe_count         # confirm, don't assume
 
 On the Virgo cluster the binary runs inside the compute container.
 `scripts/submit_all.sh` is a ready-made `sbatch` job for the
-4-node/128-rank matrix: all five backends plus the `--h5-auto-chunks`
-A/B in one allocation (round 1 in a plain directory, round 2 in a
-16-stripe one), `--verify` on every leg, and an up-front probe that
-aborts if a data file does not land with the intended stripe count.
+4-node/128-rank matrix: all five backends in one allocation (round 1 in
+a plain directory, round 2 in a 16-stripe one), `--verify` on every
+leg, and an up-front probe that aborts if a data file does not land
+with the intended stripe count.
 
 `pmd_hdf5` knobs: `pmd_chunks=rank` (default) aligns each dataset chunk
 with the per-rank box (openPMD's auto-chunker caps at 4 MiB and shatters
 the brick); `--pmd-auto-chunks` restores the library default for A/B.
-The raw `hdf5` backend uses the same rank-aligned chunking by default
-since 0.5.0; `--h5-auto-chunks` restores the old contiguous layout for A/B.
+The raw `hdf5` backend keeps the plain (contiguous) layout: applying the
+rank-aligned chunking to it (the 0.5.0 default) measured ~1.85x slower
+at 128 ranks, so it was removed in 0.6.0 — the chunk-layout win is
+openPMD-specific.
 
 Under Darshan:
 
@@ -111,45 +113,20 @@ scripts/submit_all.sh     # SLURM (sbatch): 4 nodes / 128 ranks, the full
 Backends absent from the build report `SKIPPED`, not failure. Tunables:
 `RANKS`, `LOCAL`, `PARTICLES`, `STEPS`, `MPIRUN` (see script header).
 
-Measured on Lustre (Virgo): 32 ranks, one node, 11.9 GiB checkpoint,
-striped output dir (`lfs setstripe -c 8`), `HDF5_USE_FILE_LOCKING=FALSE`,
-head-to-head via `scripts/pmd_head2head.sh` (all backends back to back in
-one session, mean of 3 checkpoints):
+Measured on Lustre (Virgo): 128 ranks (4 nodes), 47.6 GiB checkpoint,
+single-OST output dir, one job via `scripts/submit_all.sh` (every leg
+`--verify`, `HDF5_USE_FILE_LOCKING=FALSE`, mean of 3 checkpoints):
 
 | backend | MiB/s |
 |---|---|
-| **pmd_hdf5** (rank-aligned chunks) | **1268** |
-| hdf5 (raw) | 1099 |
-| mpiio | 1071 |
-| adios2 | 1013 |
-| pmd_adios2 | 955 |
+| adios2 | 2397 |
+| pmd_hdf5 | 2259 |
+| pmd_adios2 | 2218 |
+| mpiio | 1646 |
+| hdf5 | 1579 |
 
-The standard openPMD model costs nothing at production write sizes:
-`pmd_hdf5` beats the hand-written raw HDF5 path by ~18% under identical
-conditions.  Cross-run tables on a shared system mislead (earlier ones
-ranked these engines in nearly the opposite order) -- quote only
-head2head numbers.
-
-128 ranks (4 nodes), 47.6 GiB checkpoint, one job via
-`scripts/submit_all.sh` (every leg `--verify`,
-`HDF5_USE_FILE_LOCKING=FALSE`, mean of 3 checkpoints). Data files inherit
-the output directory's striping:
-
-| single-OST dir | MiB/s | | 16-stripe dir | MiB/s |
-|---|---|---|---|---|
-| adios2 | 2397 | | **pmd_hdf5** | **2695** |
-| pmd_hdf5 | 2259 | | mpiio | 1744 |
-| pmd_adios2 | 2218 | | hdf5 (rank chunks) | 1445 |
-| mpiio | 1646 | | | |
-| hdf5 `--h5-auto-chunks` | 1579 | | | |
-| hdf5 (rank chunks) | 860 | | | |
-
-At this scale: `pmd_hdf5` is on top at both placements (+19% from the
-16-stripe dir); the raw `hdf5` backend runs ~1.85x faster with
-`--h5-auto-chunks` (contiguous layout) than with rank-aligned chunks
-(1579 vs 860) -- the chunking win is openPMD-specific; and striping does
-not move `mpiio` (1646 vs 1744), whose limit is the shared-file / C-order
-field-scatter pattern, not placement.
+Cross-run tables on a shared system mislead (earlier ones ranked these
+engines in nearly the opposite order) -- quote only head2head numbers.
 
 ## Notes
 
@@ -173,16 +150,12 @@ field-scatter pattern, not placement.
   AoS stride pattern, producing byte-identical files — the gap between
   the two quantifies the in-library conversion cost. ADIOS2 pre-packs
   per member into explicit global-shape variables.
-* The `hdf5` backend chunks its datasets rank-aligned by default since
-  0.5.0: the field chunk is the per-rank brick (one contiguous on-disk
-  chunk per rank) and each particle-column chunk is the min per-rank
-  count (one chunk per rank) — the `pmd_hdf5` pattern. `scripts/
-  pmd_env_matrix.sh` measured the chunk-layout axis at ~2x on Lustre,
-  which the raw backend had never received: with the old `H5P_DEFAULT`
-  dcpl (contiguous layout) each hyperslab write scatters its brick into
-  small z-fastest runs inside one data object — the same pattern the
-  mpiio backend's C-order file pays. `--h5-auto-chunks` restores the old
-  layout for A/B; the files hold identical data either way.
+* The `hdf5` backend uses the plain (contiguous) dataset layout. The
+  rank-aligned chunking of `pmd_hdf5` was applied to it in 0.5.0 (A/B
+  via `--h5-auto-chunks`) and measured ~1.85x SLOWER at 128 ranks on a
+  single-OST file (1579 vs 860 MiB/s, same job, both verified) — the
+  chunk-layout win is openPMD-specific — so the option was removed in
+  0.6.0.
 * ADIOS2/BP5 computes per-block min/max/sum statistics on every `Put` by
   default (StatsLevel 2) — a full extra pass over the payload on the writer
   CPU, the leading suspect for BP5's write-rate gap vs. raw MPI-IO.
