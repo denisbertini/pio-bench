@@ -36,8 +36,9 @@ Every checkpoint writes, into **one** file:
 
 Per-phase timings (fields vs particles; for `pmd_*` only with
 `--pmd-split`, see above) and throughput are reported live
-and appended as machine-readable JSON Lines (`pio_metrics.jsonl`), each
-line stamped with `benchmark_version`.
+and appended as machine-readable JSON Lines to `pio_metrics.jsonl` in
+the output directory (`--dir`) — one line per checkpoint, written by
+rank 0, each stamped with `benchmark_version`.
 
 ## Build
 
@@ -65,14 +66,24 @@ mpirun -n 64 ./build/pio_bench \
 `--help` lists all options. `--verify` reads the checkpoint back — field
 cells sampled, particle blocks fully — and a mismatch aborts the job.
 
-On Lustre, create the output directory striped — a single file lands on
-ONE OST, capping every backend at one target's rate:
+On Lustre, create the output directory striped — data files created
+inside inherit the directory's layout (without it they land single-OST,
+capping every backend at one target's rate). The layout policy is
+MDT-side and can change, so confirm what a data file actually got:
 
 ```sh
 mkdir -p chkpts && lfs setstripe -c 8 chkpts/     # 8 OSTs; more for bigger jobs
 HDF5_USE_FILE_LOCKING=FALSE mpirun -n 32 ./build/pio_bench \
     --backend pmd_hdf5 --dir ./chkpts ...          # safe: one job, write-once files
+lfs getstripe chkpts/* | grep stripe_count         # confirm, don't assume
 ```
+
+On the Virgo cluster the binary runs inside the compute container.
+`scripts/submit_all.sh` is a ready-made `sbatch` job for the
+4-node/128-rank matrix: all five backends plus the `--h5-auto-chunks`
+A/B in one allocation (round 1 in a plain directory, round 2 in a
+16-stripe one), `--verify` on every leg, and an up-front probe that
+aborts if a data file does not land with the intended stripe count.
 
 `pmd_hdf5` knobs: `pmd_chunks=rank` (default) aligns each dataset chunk
 with the per-rank box (openPMD's auto-chunker caps at 4 MiB and shatters
@@ -93,6 +104,8 @@ scripts/smoke.sh          # runs every compiled-in backend with --verify
 scripts/pmd_env_matrix.sh # pmd throughput attribution matrix (one mpirun
                           # per row: locking, transfer mode, allocation,
                           # metadata, chunking, ADIOS2 reference)
+scripts/submit_all.sh     # SLURM (sbatch): 4 nodes / 128 ranks, the full
+                          # matrix in one job (see Run above)
 ```
 
 Backends absent from the build report `SKIPPED`, not failure. Tunables:
@@ -165,8 +178,8 @@ head2head numbers.
   attributed row-by-row by `scripts/pmd_env_matrix.sh`: chunk layout is
   ~2x (fixed by rank-aligned chunks), file locking through the MDS ~19%,
   transfer mode / paged file-space / deferred metadata ~0.  The dominant
-  factor is the filesystem itself: one file = one OST, so the striped
-  output directory (table above) is what puts HDF5 on top.  `pmd_adios2`
+  factor is the filesystem itself: data files inherit the output
+  directory's striping, which is what puts HDF5 on top.  `pmd_adios2`
   fans out across OSTs implicitly (per-writer files).
 
 ## Integration (mpiio_evolve)
