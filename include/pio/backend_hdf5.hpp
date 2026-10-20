@@ -308,9 +308,10 @@ public:
 
     void read_field(const std::filesystem::path& path, const Domain& d,
                     Field3d<double>& dst) const {
-        Info info = settings_.make_romio_info();
+        // Read-back is unmeasured verification: no ROMIO aggregation hints
+        // (the write-only knobs) -- matches the mpiio read path (NULL info).
         detail::H5PropObj fapl{H5Pcreate(H5P_FILE_ACCESS)};
-        detail::h5_check(H5Pset_fapl_mpio(*fapl, comm_, info.get()), "H5Pset_fapl_mpio");
+        detail::h5_check(H5Pset_fapl_mpio(*fapl, comm_, MPI_INFO_NULL), "H5Pset_fapl_mpio");
         detail::H5FileObj file{H5Fopen(path.c_str(), H5F_ACC_RDONLY, *fapl)};
         detail::H5DsetObj dset{H5Dopen(*file, "/fields/data", H5P_DEFAULT)};
 
@@ -348,9 +349,10 @@ public:
         if (n == 0)
             return;
 
-        Info info = settings_.make_romio_info();
+        // Read-back is unmeasured verification: no ROMIO aggregation hints
+        // (the write-only knobs) -- matches the mpiio read path (NULL info).
         detail::H5PropObj fapl{H5Pcreate(H5P_FILE_ACCESS)};
-        detail::h5_check(H5Pset_fapl_mpio(*fapl, comm_, info.get()), "H5Pset_fapl_mpio");
+        detail::h5_check(H5Pset_fapl_mpio(*fapl, comm_, MPI_INFO_NULL), "H5Pset_fapl_mpio");
         detail::H5FileObj file{H5Fopen(path.c_str(), H5F_ACC_RDONLY, *fapl)};
         if (*file < 0)
             throw std::runtime_error("H5Fopen failed: " + path.string());
