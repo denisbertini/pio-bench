@@ -39,15 +39,11 @@ struct IoSettings {
     bool pmd_rank_chunks{true}; // pmd_hdf5: chunk datasets at the per-rank box
                                 // (production pattern; false = openPMD "auto"
                                 // 4 MiB-capped chunks, cf. --pmd-auto-chunks)
-    bool h5_rank_chunks{true};  // hdf5: chunk datasets at the per-rank box
-                                // (field) / min per-rank count (columns) --
-                                // the pmd_hdf5 pattern; false = H5P_DEFAULT
-                                // contiguous layout, cf. --h5-auto-chunks
 
     static IoSettings from(const BenchConfig& c) {
         return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
                           c.h5_prepack, c.adi_stats, c.pmd_split,
-                          c.pmd_rank_chunks, c.h5_rank_chunks};
+                          c.pmd_rank_chunks};
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.

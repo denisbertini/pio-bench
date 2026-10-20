@@ -126,11 +126,6 @@ struct BenchConfig {
     bool collective_buffering{true};           // ROMIO hint (mpiio/hdf5)
     bool h5_prepack{true};                     // hdf5: contiguous staging writes
                                                // (false = in-library strided)
-    bool h5_rank_chunks{true};                 // hdf5: rank-aligned dataset chunks
-                                               // (one chunk per rank brick /
-                                               // column); --h5-auto-chunks = the
-                                               // old H5P_DEFAULT (contiguous)
-                                               // layout, for A/B
     bool adi_stats{true};                      // adios2: BP5 per-block statistics
     bool pmd_split{false};                     // pmd_*: two incremental flushes ->
                                                // phase split; default off = the
@@ -168,10 +163,6 @@ struct BenchConfig {
         "  --no-cb                disable ROMIO collective buffering\n"
         "  --h5-strided           hdf5: in-library strided particle writes\n"
         "                         (default: pre-packed contiguous writes)\n"
-        "  --h5-auto-chunks       hdf5: default (contiguous) dataset layout\n"
-        "                         instead of rank-aligned chunks (one chunk\n"
-        "                         per rank brick / column; the pmd_hdf5\n"
-        "                         pattern, cf. --pmd-auto-chunks)\n"
         "  --no-adi-stats         adios2: BP5 StatsLevel=0 (skip per-block\n"
         "                         min/max/sum statistics of every written block)\n"
         "  --pmd-split            pmd_*: two incremental flushes to split\n"
@@ -255,8 +246,6 @@ struct BenchConfig {
                 cfg.collective_buffering = false;
             } else if (key == "h5-strided") {
                 cfg.h5_prepack = false;
-            } else if (key == "h5-auto-chunks") {
-                cfg.h5_rank_chunks = false;
             } else if (key == "no-adi-stats") {
                 cfg.adi_stats = false;
             } else if (key == "pmd-split") {
@@ -320,8 +309,7 @@ struct BenchConfig {
            << " verify=" << (verify ? "on" : "off")
            << " keep_files=" << (keep_files ? "on" : "off");
         if (backend == BackendKind::Hdf5)
-            os << " h5_write=" << (h5_prepack ? "prepack" : "strided")
-               << " h5_chunks=" << (h5_rank_chunks ? "rank" : "auto");
+            os << " h5_write=" << (h5_prepack ? "prepack" : "strided");
         if (backend == BackendKind::Adios2)
             os << " adi_stats=" << (adi_stats ? "on" : "off");
         if (backend == BackendKind::PmdHdf5 || backend == BackendKind::PmdAdios2)
