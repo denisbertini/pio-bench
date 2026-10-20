@@ -12,13 +12,13 @@ selectable backends:
 | `pmd_hdf5`   | openPMD-api → HDF5 | `.h5`  |
 | `pmd_adios2` | openPMD-api → BP5  | `.bp`  |
 
-The `pmd_*` backends write standard openPMD files -- the checkpoint
-format used by production PIC codes such as WarpX and PIConGPU: mesh
+The `pmd_*` backends write standard [openPMD](https://github.com/openPMD/openPMD-standard) files -- the checkpoint
+format used by production PIC codes such as [WarpX](https://github.com/BLAST-WarpX/warpx) and [PIConGPU](https://github.com/ComputationalRadiationPhysics/picongpu): mesh
 `field/rho` plus species `electrons` with `position`, `momentum`, `mass`
 and `id` columns.  The code follows openPMD's own examples (8a and 3b):
 data is handed to openPMD as `shared_ptr` buffers and written with one
 flush when the iteration closes.  Everything is checked bit-exact by
-`--verify`.  Needs openPMD-api (0.16 or newer); without it these two
+`--verify`.  Needs [openPMD-api](https://github.com/openPMD/openPMD-api) (0.16 or newer); without it these two
 backends are simply not built.  By default only the total write time is
 meaningful (openPMD defers the real work to the final flush); add
 `--pmd-split` to flush field and particle data separately and get a
@@ -42,8 +42,8 @@ rank 0, each stamped with `benchmark_version`.
 
 ## Build
 
-Requirements: MPI, a C++20 compiler. HDF5 must be a **parallel** build
-(serial HDF5 is auto-detected and the backend compiled out). ADIOS2 is
+Requirements: MPI, a C++20 compiler. [HDF5](https://www.hdfgroup.org/solutions/hdf5/) must be a **parallel** build
+(serial HDF5 is auto-detected and the backend compiled out). [ADIOS2](https://github.com/ornladios/ADIOS2) is
 optional; unavailable backends are removed at compile time.
 
 ```sh
@@ -91,7 +91,7 @@ the brick); `--pmd-auto-chunks` restores the library default for A/B.
 The raw `hdf5` backend uses the same rank-aligned chunking by default
 since 0.5.0.
 
-Under Darshan:
+Under [Darshan](https://github.com/darshan-hpc/darshan):
 
 ```sh
 DARSHAN_LOGPATH=$PWD darshan-runtime mpirun -n 64 ./build/pio_bench ...
