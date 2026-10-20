@@ -130,6 +130,27 @@ conditions.  Cross-run tables on a shared system mislead (earlier ones
 ranked these engines in nearly the opposite order) -- quote only
 head2head numbers.
 
+128 ranks (4 nodes), 47.6 GiB checkpoint, one job via
+`scripts/submit_all.sh` (every leg `--verify`,
+`HDF5_USE_FILE_LOCKING=FALSE`, mean of 3 checkpoints). Data files inherit
+the output directory's striping:
+
+| single-OST dir | MiB/s | | 16-stripe dir | MiB/s |
+|---|---|---|---|---|
+| adios2 | 2397 | | **pmd_hdf5** | **2695** |
+| pmd_hdf5 | 2259 | | mpiio | 1744 |
+| pmd_adios2 | 2218 | | hdf5 (rank chunks) | 1445 |
+| mpiio | 1646 | | | |
+| hdf5 `--h5-auto-chunks` | 1579 | | | |
+| hdf5 (rank chunks) | 860 | | | |
+
+At this scale: `pmd_hdf5` is on top at both placements (+19% from the
+16-stripe dir); the raw `hdf5` backend runs ~1.85x faster with
+`--h5-auto-chunks` (contiguous layout) than with rank-aligned chunks
+(1579 vs 860) -- the chunking win is openPMD-specific; and striping does
+not move `mpiio` (1646 vs 1744), whose limit is the shared-file / C-order
+field-scatter pattern, not placement.
+
 ## Notes
 
 * Field values are the flattened global index; particle `id`s are the
