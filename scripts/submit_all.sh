@@ -10,7 +10,8 @@
 # submit_all.sh -- the 128-rank matrix in ONE sbatch job, so every number
 # is a within-session comparison:
 #   round 1 (default placement; new files land single-OST here) -- all
-#     five backends: hdf5, mpiio, pmd_hdf5, adios2, pmd_adios2
+#     five backends: hdf5 (rank chunks), hdf5 --h5-auto-chunks (A/B),
+#     mpiio, pmd_hdf5, adios2, pmd_adios2
 #   round 2 (16-stripe directory; files created inside inherit 16
 #     stripes) -- the three shared-file backends: mpiio, hdf5, pmd_hdf5.
 #     Each leg's stripe-1 reference is its own round-1 leg, same job.
@@ -57,6 +58,7 @@ rm -f r2/.layout_probe
 
 # ---- round 1: default placement (single-OST) ----------------
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend hdf5     $C"
+srun --export=ALL apptainer exec $CONT bash -c "$B --backend hdf5     $C --h5-auto-chunks"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend mpiio    $C"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend pmd_hdf5 $C"
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend adios2   $C"
