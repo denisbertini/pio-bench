@@ -12,7 +12,7 @@
 # The striped-file test needs a stripe-1 CONTROL in the same session
 # (cross-session drift on this system is ~25-50%), so each backend runs
 # BOTH placements back to back, interleaved per backend:
-#   mpiio     : r2ctrl (fresh, lands single-OST) -> r2 (pre-created 16-stripe)
+#   mpiio     : r2ctrl (fresh, single-OST) -> r2 (16-stripe dir, inherited)
 #   hdf5      : same
 #   pmd_hdf5  : same
 #   adios2    : r2ctrl only (within-session fan-out reference)
@@ -41,15 +41,24 @@ B=../build/pio_bench
 # completion barrier), so it costs job wall time, not benchmark numbers.
 O="--local 256 --particles 4000000 --steps 3 --keep-files --verify"
 C="--dir ${A}/r2ctrl $O"   # control: fresh files, land single-OST
-C2="--dir ${A}/r2 $O"      # test: pre-created 16-stripe files
+C2="--dir ${A}/r2 $O"      # test: 16-stripe directory, files inherit it
 
-# pre-create + 16-stripe the round-2 files
-for i in 1 2 3; do
-  f="r2/chkpt_$(printf %06d $i)_step_$(printf %06d $i)"
-  rm -f "$f.bin" "$f.h5"  # fresh files: setstripe refuses to re-stripe
-  : > "$f.bin"; lfs setstripe -c 16 "$f.bin"
-  : > "$f.h5";  lfs setstripe -c 16 "$f.h5"
-done
+# test: stripe the DIRECTORY -- files created inside inherit the layout
+# (verified on this cluster: touch inside a 16-stripe dir -> 16 obdidxes;
+#  the per-file pre-create + setstripe loop is no longer needed)
+lfs setstripe -c 16 r2
+
+# layout self-check: verify what a data file in each dir ACTUALLY gets,
+# and abort loudly instead of spending 30 min measuring 16-vs-16 (if the
+# MDT default layout changed cluster-wide, r2ctrl would NOT be a control)
+: > r2/.layout_probe
+lfs getstripe r2/.layout_probe | grep -qE 'stripe_count: *16$' \
+  || { echo "E-: file in r2 is NOT 16-stripe -- aborting"; exit 1; }
+rm -f r2/.layout_probe
+: > r2ctrl/.layout_probe
+lfs getstripe r2ctrl/.layout_probe | grep -qE 'stripe_count: *1$' \
+  || { echo "E-: file in r2ctrl is NOT stripe-1 (MDT default layout changed?) -- aborting"; exit 1; }
+rm -f r2ctrl/.layout_probe
 
 # interleaved per backend: each A/B pair stays adjacent in time
 srun --export=ALL apptainer exec $CONT bash -c "$B --backend mpiio    $C"
