@@ -21,11 +21,13 @@ technical notes.
 - C++20 compiler (`mpicxx`)
 - CMake ≥ 3.22
 - Parallel [HDF5](https://www.hdfgroup.org/solutions/hdf5/) (for `hdf5` / `pmd_hdf5`)
-- [openPMD-api](https://github.com/openPMD/openPMD-api) (for `pmd_hdf5` / `pmd_adios2`)
-- [ADIOS2](https://github.com/ornladios/ADIOS2) (optional, for `adios2` / `pmd_adios2`)
+- [ADIOS2](https://github.com/ornladios/ADIOS2) (for `adios2` / `pmd_adios2`)
+- [openPMD-api](https://github.com/openPMD/openPMD-api) — optional, `pmd_hdf5` / `pmd_adios2` only
 
-Missing optional dependencies simply omit the corresponding backends at build
-time.
+A missing library simply omits the backends that need it at build time. The
+general backends (`mpiio`, `hdf5`, `adios2`) and the CI gate
+(`scripts/ci_test.sh`) therefore need only parallel HDF5 and ADIOS2 — not
+openPMD-api.
 
 ## Build
 
