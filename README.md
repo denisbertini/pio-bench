@@ -68,13 +68,13 @@ fails, or is silently compiled out, pinpoints a broken or missing dependency.
 scripts/ci_test.sh    # small + fast: mpiio, hdf5 (parallel), adios2, --verify
 ```
 
-This is a cheap **CI gate for a container / HPC environment**: `ci_test.sh`
-runs the three general filesystem backends at a minimal size (openPMD/`pmd_*`
-are deliberately excluded as too specific) and exits non-zero unless every
-required backend is present and verifies. Run it inside the compute container
-to validate the I/O stack of the Apptainer image (e.g. on the GSI **VAEs**
-cluster) before trusting it for production. For a full multi-node check — 4
-nodes, all five backends, real Lustre striping — use `scripts/submit_all.sh`.
+`ci_test.sh` runs the three major HPC I/O backends — `mpiio`, `hdf5`
+(parallel) and `adios2` — at a minimal size, to test the proper installation
+of the backends and their MPI dependencies. It can be used to quickly validate
+the I/O stack installed on the compute nodes of a cluster, or in a container
+image environment, before trusting it for production. For a full multi-node
+check — 4 nodes, all five backends, real Lustre striping — use
+`scripts/submit_all.sh`.
 
 ## Documentation
 

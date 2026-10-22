@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ci_test.sh -- CI gate for the GENERAL parallel I/O stack.
 #
-# Exercises the three filesystem backends (openPMD / `pmd_*` deliberately
-# excluded) at a small size with read-back verification. Run it INSIDE the
-# compute container: a green run proves MPI-IO/ROMIO, parallel HDF5 and ADIOS2
-# are installed, built parallel, and wired to the MPI + filesystem stack. Cheap
-# enough to run on every container build / push (e.g. the VAEs Apptainer image
-# at GSI).
+# Runs the three major HPC I/O backends -- mpiio, hdf5 (parallel) and adios2 --
+# at a minimal size to test the proper installation of the backends and their
+# MPI dependencies. It can be used to quickly validate the I/O stack installed
+# on the compute nodes of a cluster, or in a container image environment,
+# before trusting it for production. For a full multi-node check -- 4 nodes,
+# all five backends, real Lustre striping -- use scripts/submit_all.sh.
 #
 #   exercised : mpiio (MPI-IO/ROMIO)   hdf5 (parallel HDF5)   adios2 (ADIOS2 BP5)
 #   not used  : openPMD (pmd_*)  -- too specific for a general I/O gate
