@@ -1,48 +1,62 @@
-#!/usr/bin/env bash
-# ci_test.sh -- CI gate for the GENERAL parallel I/O stack.
+#!/bin/bash
+#SBATCH --job-name=pio-bench-ci
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=1
+#SBATCH --time=00:20:00
+#SBATCH --output=pio-bench-ci_%j.out
+#SBATCH --error=pio-bench-ci_%j.err
+# ci_test.sh -- CI gate for the GENERAL parallel I/O stack, as ONE small
+# sbatch job (the CI twin of submit_all.sh):
+#   one node, 4 ranks, the three major HPC I/O backends -- mpiio,
+#   hdf5 (parallel) and adios2 -- at a minimal size, default file
+#   placement (no lfs setstripe), each leg verified by read-back.
 #
-# Runs the three major HPC I/O backends -- mpiio, hdf5 (parallel) and adios2 --
-# at a minimal size to test the proper installation of the backends and their
-# MPI dependencies. It can be used to quickly validate the I/O stack installed
-# on the compute nodes of a cluster, or in a container image environment,
-# before trusting it for production. For a full multi-node check -- 4 nodes,
-# all five backends, real Lustre striping -- use scripts/submit_all.sh.
-#
-#   exercised : mpiio (MPI-IO/ROMIO)   hdf5 (parallel HDF5)   adios2 (ADIOS2 BP5)
-#   not used  : openPMD (pmd_*)  -- too specific for a general I/O gate
-#
-# Tunables (env):
-#   BIN=build/pio_bench      benchmark binary
-#   MPIRUN=mpirun            launcher (e.g. "mpiexec --oversubscribe")
-#   RANKS=4 LOCAL=32 PARTICLES=50000 STEPS=1   (small by default -> fast)
-#   REQUIRE="mpiio hdf5 adios2"   backends that MUST be available AND pass
+# Runs the three major HPC I/O backends at a minimal size to test the
+# proper installation of the backends and their MPI dependencies. It can
+# be used to quickly validate the I/O stack installed on the compute nodes
+# of a cluster, or in a container image environment, before trusting it
+# for production. For a full multi-node check -- 4 nodes, all five
+# backends, real Lustre striping -- use scripts/submit_all.sh.
 #
 # Exit 0 only if every REQUIRED backend is present and verifies, and no
-# exercised backend fails. A backend compiled out of the build is SKIPPED -- a
-# failure only if it is listed in REQUIRE.
-set -u
+# exercised backend fails. A backend compiled out of the build is SKIPPED
+# (benchmark exit code 2) -- a failure only if it is listed in REQUIRE.
+# No --keep-files: each leg's read-back verify happens inside the run, and
+# the per-job output dir is removed when the job finishes.
+#
+# Env overrides:
+#   CONT=...sif               Apptainer/Singularity image
+#   APPTAINER_BINDPATH=...    path bind-mounted into the container
+#   REQUIRE="mpiio hdf5 adios2"   backends that MUST be available AND pass
+#   (add --partition=... to the SBATCH header if your cluster needs it)
+#
+# Usage: sbatch scripts/ci_test.sh
+# =============================================
+# PIO CI
+# =============================================
+A="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export CONT="${CONT:-/lustre/rz/dbertini2/mpiio_evolve/container/plasma_pp.sif}"
+export APPTAINER_BINDPATH="${APPTAINER_BINDPATH:-/lustre/rz/dbertini2}"
+export APPTAINER_SHARENS=true
+export APPTAINER_CONFIGDIR=/tmp/$USER
+export OMPI_MCA_io=romio341
+export HDF5_USE_FILE_LOCKING=FALSE
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$A" || exit 1
+B=../build/pio_bench
+[ -x "$B" ] || { echo "E-: benchmark binary not found: $B (build first)"; exit 1; }
 
-BIN="${BIN:-$REPO_DIR/build/pio_bench}"
-MPIRUN="${MPIRUN:-mpirun}"
-RANKS="${RANKS:-4}"
-LOCAL="${LOCAL:-32}"
-PARTICLES="${PARTICLES:-50000}"
-STEPS="${STEPS:-1}"
-REQUIRE="${REQUIRE:-mpiio hdf5 adios2}"
+# default striping: no lfs setstripe, files land with the MDT default layout
+D="$A/ci_${SLURM_JOB_ID}"
+rm -rf "$D"
+mkdir -p "$D"
+O="--dir $D --local 32 --particles 50000 --steps 1 --interval 1 --verify"
 
-# general I/O backends only (openPMD / pmd_* intentionally excluded)
-BACKENDS="mpiio hdf5 adios2"
+BACKENDS="mpiio hdf5 adios2"   # general I/O backends only (openPMD/pmd_* too specific)
+REQUIRE="${REQUIRE:-$BACKENDS}"
 
-[ -x "$BIN" ] || { echo "CI ERROR: benchmark binary not found: $BIN (build first)"; exit 1; }
-
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/pio_ci.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
-
-echo "pio-bench CI: $MPIRUN -n $RANKS   local=$LOCAL particles=$PARTICLES steps=$STEPS"
-echo "pio-bench CI: required = [$REQUIRE]"
+echo "pio-bench CI: job=$SLURM_JOB_ID ranks=4 required=[$REQUIRE] dir=$D"
 echo
 
 fail=0
@@ -51,12 +65,10 @@ for b in $BACKENDS; do
     tag=""; for r in $REQUIRE; do [ "$r" = "$b" ] && tag=" [required]"; done
 
     echo "=== $b$tag ==="
-    ( cd "$WORK" && $MPIRUN -n "$RANKS" "$BIN" \
-        --backend "$b" --local "$LOCAL" --particles "$PARTICLES" \
-        --steps "$STEPS" --interval 1 --verify ) 2>&1 | tee "$WORK/$b.log"
-    rc=${PIPESTATUS[0]}
+    srun --export=ALL apptainer exec "$CONT" bash -c "$B --backend $b $O"
+    rc=$?
 
-    if grep -q "SKIPPED:" "$WORK/$b.log" || [ "$rc" -eq 2 ]; then
+    if [ "$rc" -eq 2 ]; then
         if [ -n "$tag" ]; then
             echo "-- $b: SKIPPED (not compiled in) -- but REQUIRED => FAIL"
             fail=1
@@ -75,6 +87,7 @@ done
 
 [ "$ran" -eq 0 ] && { echo "CI ERROR: no backend was actually exercised"; fail=1; }
 
+rm -rf "$D"
 if [ "$fail" -eq 0 ]; then
     echo "CI: OK -- general I/O stack verified ($ran backend(s) passed)"
 else

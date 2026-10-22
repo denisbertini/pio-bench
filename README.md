@@ -65,7 +65,7 @@ not serial), and wired to the MPI stack and the filesystem. A backend that
 fails, or is silently compiled out, pinpoints a broken or missing dependency.
 
 ```sh
-scripts/ci_test.sh    # small + fast: mpiio, hdf5 (parallel), adios2, --verify
+sbatch scripts/ci_test.sh    # 1 node, 4 ranks: mpiio, hdf5 (parallel), adios2, --verify
 ```
 
 `ci_test.sh` runs the three major HPC I/O backends — `mpiio`, `hdf5`

@@ -70,7 +70,10 @@ scripts/pmd_head2head.sh  # all five backends back to back in one session --
                           # the number to quote
 scripts/submit_all.sh     # SLURM (sbatch): 4 nodes / 128 ranks, the full
                           # matrix in one job
+scripts/ci_test.sh        # SLURM (sbatch): 1 node / 4 ranks, the three
+                          # general backends at minimal size -- CI gate
 ```
 
 Backends absent from the build report `SKIPPED`, not failure. Tunables:
-`RANKS`, `LOCAL`, `PARTICLES`, `STEPS`, `MPIRUN` (see each script's header).
+`RANKS`, `LOCAL`, `PARTICLES`, `STEPS`, `MPIRUN` (see each script's header);
+for the sbatch scripts, `CONT`, `APPTAINER_BINDPATH` and `REQUIRE`.
