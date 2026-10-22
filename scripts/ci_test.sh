@@ -41,7 +41,7 @@
 # =============================================
 A="${A:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 export CONT="${CONT:-/lustre/rz/dbertini2/mpiio_evolve/container/plasma_pp.sif}"
-export APPTAINER_BINDPATH="${APPTAINER_BINDPATH:-/lustre/rz/dbertini2}"
+export APPTAINER_BINDPATH="${APPTAINER_BINDPATH:-/lustre/rz/dbertini2:/lustre/rz/dbertini}"
 export APPTAINER_SHARENS=true
 export APPTAINER_CONFIGDIR=/tmp/$USER
 export OMPI_MCA_io=romio341
