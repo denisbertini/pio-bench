@@ -73,8 +73,10 @@ The defaults in the script header can be overridden with sbatch options
 
 ```sh
 LOCAL=256 PARTICLES=4000000 STEPS=3 \
-  sbatch --nodes=4 --ntasks-per-node=32 --partition=long ci_test.sh
+  sbatch --nodes=4 --ntasks-per-node=32 --partition=long --time=02:00:00 ci_test.sh
 ```
+
+(the 20-min default covers the minimal size; bump `--time` when scaling)
 
 `ci_test.sh` runs the three major HPC I/O backends — `mpiio`, `hdf5`
 (parallel) and `adios2` — at a minimal size, to test the proper installation

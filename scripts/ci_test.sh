@@ -33,9 +33,11 @@
 # elsewhere. REQUIRE="mpiio hdf5 adios2" may be overridden via env to relax
 # the gate.
 # Scale the run: allocation via sbatch options (they override the #SBATCH
-# defaults above), size (per rank) via env, e.g. the submit_all.sh shape:
+# defaults above), size (per rank) via env, e.g. the submit_all.sh shape
+# (the 20-min default covers the minimal size -- bump --time when scaling):
 #   LOCAL=256 PARTICLES=4000000 STEPS=3 \
-#     sbatch --nodes=4 --ntasks-per-node=32 --partition=long ci_test.sh
+#     sbatch --nodes=4 --ntasks-per-node=32 --partition=long \
+#     --time=02:00:00 ci_test.sh
 # submitted from the scripts dir (cd scripts && sbatch ci_test.sh), so
 # SLURM_SUBMIT_DIR is the scripts dir and the repo root is one level up
 A="$SLURM_SUBMIT_DIR"
