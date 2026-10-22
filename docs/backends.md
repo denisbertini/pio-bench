@@ -76,6 +76,6 @@ scripts/ci_test.sh        # SLURM (sbatch): 1 node / 4 ranks, the three
 
 Backends absent from the build report `SKIPPED`, not failure. Tunables:
 `RANKS`, `LOCAL`, `PARTICLES`, `STEPS`, `MPIRUN` (see each script's header);
-for the sbatch scripts, `CONT`, `APPTAINER_BINDPATH`, `REQUIRE`, and
-`A` / `BIN` (repo scripts dir and benchmark binary, if the paths derived
-on the compute node do not resolve to your clone).
+for the sbatch scripts, `REQUIRE`; `ci_test.sh` derives the clone/build
+paths from `SLURM_SUBMIT_DIR` (submit from the scripts dir: `cd scripts &&
+sbatch ci_test.sh`) and sets the image / bind paths at the top of the script.

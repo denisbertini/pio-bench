@@ -25,34 +25,30 @@
 # No --keep-files: each leg's read-back verify happens inside the run, and
 # the per-job output dir is removed when the job finishes.
 #
-# Env overrides (inherited by the sbatch job from the submit shell):
-#   CONT=...sif               Apptainer/Singularity image
-#   APPTAINER_BINDPATH=...    path bind-mounted into the container
-#   REQUIRE="mpiio hdf5 adios2"   backends that MUST be available AND pass
-#   A=/path/to/repo/scripts   scripts dir (default: this file's directory;
-#                             sbatch runs on a compute node, so set it if the
-#                             derived path does not resolve there)
-#   BIN=/path/to/pio_bench    benchmark binary (default: <repo>/build/pio_bench)
-#   (add --partition=... to the SBATCH header if your cluster needs it)
-#
-# Usage: sbatch scripts/ci_test.sh
+# Clone/build paths derive from SLURM_SUBMIT_DIR, so submit from the
+# scripts dir (the batch CWD on the compute node is not reliable -- this
+# site runs the script from a spool copy):
+#   cd scripts && sbatch ci_test.sh
+# CONT / BINDPATH are set explicitly below; edit them if the image lives
+# elsewhere. REQUIRE="mpiio hdf5 adios2" may be overridden via env to relax
+# the gate. (add --partition=... to the SBATCH header if your cluster needs it)
 # =============================================
 # PIO CI
 # =============================================
-A="${A:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-export CONT="${CONT:-/lustre/rz/dbertini2/mpiio_evolve/container/plasma_pp.sif}"
-export APPTAINER_BINDPATH="${APPTAINER_BINDPATH:-/lustre/rz/dbertini2:/lustre/rz/dbertini}"
+# submitted from the scripts dir (cd scripts && sbatch ci_test.sh), so
+# SLURM_SUBMIT_DIR is the scripts dir and the repo root is one level up
+A="$SLURM_SUBMIT_DIR"
+export CONT=/lustre/rz/dbertini2/mpiio_evolve/container/plasma_pp.sif
+export APPTAINER_BINDPATH=/lustre/rz/dbertini2:/lustre/rz/dbertini
 export APPTAINER_SHARENS=true
 export APPTAINER_CONFIGDIR=/tmp/$USER
 export OMPI_MCA_io=romio341
 export HDF5_USE_FILE_LOCKING=FALSE
 
+[ -n "${SLURM_SUBMIT_DIR:-}" ] || { echo "E-: SLURM_SUBMIT_DIR unset -- submit from the scripts dir: cd scripts && sbatch ci_test.sh"; exit 1; }
 cd "$A" || exit 1
-B="${BIN:-$(cd "$A/.." && pwd)/build/pio_bench}"    # absolute; set BIN to override
-[ -x "$B" ] || { echo "E-: benchmark binary not found: $B" \
-    " (build first, or resubmit with A=/path/to/repo/scripts -- some sites" \
-    " run the batch script from a spool copy, so the derived path may miss" \
-    " your clone; BIN=/path/to/pio_bench overrides the binary directly)"; exit 1; }
+B="$(cd "$A/.." && pwd)/build/pio_bench"
+[ -x "$B" ] || { echo "E-: benchmark binary not found: $B (build first)"; exit 1; }
 
 # default striping: no lfs setstripe, files land with the MDT default layout
 D="$A/ci_${SLURM_JOB_ID}"
