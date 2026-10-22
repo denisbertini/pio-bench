@@ -30,10 +30,13 @@
 # site runs the script from a spool copy):
 #   cd scripts && sbatch ci_test.sh
 # CONT / BINDPATH are set explicitly below; edit them if the image lives
-# elsewhere. REQUIRE="mpiio hdf5 adios2" may be overridden via env to relax
-# the gate.
-# Scale the run with sbatch options (they override the #SBATCH defaults
-# above), e.g. the submit_all.sh shape:
+# elsewhere.
+# Test size (per rank) defaults to minimal; scale it via env (inherited by
+# the batch job from the submit shell), e.g.:
+#   LOCAL=256 PARTICLES=4000000 STEPS=3
+# REQUIRE="mpiio hdf5 adios2" may be overridden via env to relax the gate.
+# Scale the allocation with sbatch options (they override the #SBATCH
+# defaults above), e.g. the submit_all.sh shape:
 #   sbatch --nodes=4 --ntasks-per-node=32 --partition=long ci_test.sh
 # =============================================
 # PIO CI
@@ -58,12 +61,16 @@ B="$(cd "$A/.." && pwd)/build/pio_bench"
 D="$A/ci_${SLURM_JOB_ID}"
 rm -rf "$D"
 mkdir -p "$D"
-O="--dir $D --local 32 --particles 50000 --steps 1 --interval 1 --verify"
 
 BACKENDS="mpiio hdf5 adios2"   # general I/O backends only (openPMD/pmd_* too specific)
 REQUIRE="${REQUIRE:-$BACKENDS}"
+LOCAL="${LOCAL:-32}"          # per-rank field matrices (minimal default)
+PARTICLES="${PARTICLES:-50000}"
+STEPS="${STEPS:-1}"           # checkpoints
 
-echo "pio-bench CI: job=$SLURM_JOB_ID ranks=$SLURM_NTASKS required=[$REQUIRE] dir=$D"
+O="--dir $D --local $LOCAL --particles $PARTICLES --steps $STEPS --interval 1 --verify"
+
+echo "pio-bench CI: job=$SLURM_JOB_ID ranks=$SLURM_NTASKS local=$LOCAL particles=$PARTICLES steps=$STEPS required=[$REQUIRE] dir=$D"
 echo "pio-bench CI: scriptdir=$A binary=$B"
 echo
 
