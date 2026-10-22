@@ -54,6 +54,26 @@ For Lustre and similar HPC filesystems, configure striping and tuning hints
 [`docs/internals.md`](docs/internals.md). Automated test scripts and Slurm
 batch files are provided under `scripts/`.
 
+## CI / environment check
+
+Because each backend drives a different parallel I/O library — MPI-IO/ROMIO,
+parallel HDF5, and ADIOS2 — a run that completes and passes `--verify` is a
+real integration test that the I/O stack is present, correctly built (parallel,
+not serial), and wired to the MPI stack and the filesystem. A backend that
+fails, or is silently compiled out, pinpoints a broken or missing dependency.
+
+```sh
+scripts/ci_test.sh    # small + fast: mpiio, hdf5 (parallel), adios2, --verify
+```
+
+This is a cheap **CI gate for a container / HPC environment**: `ci_test.sh`
+runs the three general filesystem backends at a minimal size (openPMD/`pmd_*`
+are deliberately excluded as too specific) and exits non-zero unless every
+required backend is present and verifies. Run it inside the compute container
+to validate the I/O stack of the Apptainer image (e.g. on the GSI **VAEs**
+cluster) before trusting it for production. For a full multi-node check — 4
+nodes, all five backends, real Lustre striping — use `scripts/submit_all.sh`.
+
 ## Documentation
 
 - Backend details: [`docs/backends.md`](docs/backends.md)
