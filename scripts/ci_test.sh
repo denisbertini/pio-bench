@@ -49,7 +49,10 @@ export HDF5_USE_FILE_LOCKING=FALSE
 
 cd "$A" || exit 1
 B="${BIN:-$(cd "$A/.." && pwd)/build/pio_bench}"    # absolute; set BIN to override
-[ -x "$B" ] || { echo "E-: benchmark binary not found: $B (build first, or set BIN)"; exit 1; }
+[ -x "$B" ] || { echo "E-: benchmark binary not found: $B" \
+    " (build first, or resubmit with A=/path/to/repo/scripts -- some sites" \
+    " run the batch script from a spool copy, so the derived path may miss" \
+    " your clone; BIN=/path/to/pio_bench overrides the binary directly)"; exit 1; }
 
 # default striping: no lfs setstripe, files land with the MDT default layout
 D="$A/ci_${SLURM_JOB_ID}"
