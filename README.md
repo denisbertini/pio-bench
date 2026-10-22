@@ -60,15 +60,19 @@ batch files are provided under `scripts/`.
 
 `ci_test.sh` is a small SLURM job that runs the three major HPC I/O
 backends — `mpiio`, `hdf5` (parallel) and `adios2` — at a minimal size,
-to test the proper installation of the backends and their MPI dependencies.
-Because each backend drives a different parallel I/O library — MPI-IO/ROMIO,
-parallel HDF5, and ADIOS2 — a run that completes and passes `--verify` is a
-real integration test that the I/O stack is present, correctly built (parallel,
-not serial), and wired to the MPI stack and the filesystem. A backend that
-fails, or is silently compiled out, pinpoints a broken or missing dependency.
-It can be used to quickly validate the I/O stack installed on the compute
-nodes of a cluster, or in a container image environment, before trusting it
-for production.
+to test the proper installation of the backends and their MPI
+dependencies.
+
+Each backend drives a different parallel I/O library — MPI-IO/ROMIO,
+parallel HDF5, and ADIOS2 — so a run that completes and passes
+`--verify` is a real integration test that the I/O stack is present,
+correctly built (parallel, not serial), and wired to the MPI stack and
+the filesystem. A backend that fails, or is silently compiled out,
+pinpoints a broken or missing dependency.
+
+Use it to quickly validate the I/O stack installed on the compute nodes
+of a cluster, or in a container image environment, before trusting it
+for production:
 
 ```sh
 cd scripts && sbatch ci_test.sh    # default: 1 node, 4 ranks, minimal size
@@ -83,7 +87,7 @@ LOCAL=256 PARTICLES=4000000 STEPS=3 \
   sbatch --nodes=4 --ntasks-per-node=32 --partition=long --time=02:00:00 ci_test.sh
 ```
 
-(the 20-min default covers the minimal size; bump `--time` when scaling)
+The 20-min default covers the minimal size; bump `--time` when scaling.
 
 For a full multi-node check — 4 nodes, all five backends, real Lustre
 striping — use `scripts/submit_all.sh`.
