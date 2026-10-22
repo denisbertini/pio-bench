@@ -76,7 +76,7 @@ cd scripts && sbatch ci_test.sh    # default: 1 node, 4 ranks, minimal size
 
 Scaling: sbatch options override the `#SBATCH` defaults in the script
 header (allocation, partition, time), and the per-rank test size is set
-via env, e.g. the `submit_all.sh` shape:
+via env:
 
 ```sh
 LOCAL=256 PARTICLES=4000000 STEPS=3 \
