@@ -40,7 +40,7 @@
 #     --time=02:00:00 ci_test.sh
 # submitted from the scripts dir (cd scripts && sbatch ci_test.sh), so
 # SLURM_SUBMIT_DIR is the scripts dir and the repo root is one level up
-A="$SLURM_SUBMIT_DIR"
+SCRIPT_DIR="$SLURM_SUBMIT_DIR"
 export CONT=/lustre/rz/dbertini2/mpiio_evolve/container/plasma_pp.sif
 # comma-separated (colon inside a spec means src:dest, not a path separator)
 export APPTAINER_BINDPATH=/lustre/rz/dbertini2,/lustre/rz/dbertini
@@ -50,14 +50,14 @@ export OMPI_MCA_io=romio341
 export HDF5_USE_FILE_LOCKING=FALSE
 
 [ -n "${SLURM_SUBMIT_DIR:-}" ] || { echo "E-: SLURM_SUBMIT_DIR unset -- submit from the scripts dir: cd scripts && sbatch ci_test.sh"; exit 1; }
-cd "$A" || exit 1
-B="$(cd "$A/.." && pwd)/build/pio_bench"
-[ -x "$B" ] || { echo "E-: benchmark binary not found: $B (build first)"; exit 1; }
+cd "$SCRIPT_DIR" || exit 1
+BENCH_BIN="$(cd "$SCRIPT_DIR/.." && pwd)/build/pio_bench"
+[ -x "$BENCH_BIN" ] || { echo "E-: benchmark binary not found: $BENCH_BIN (build first)"; exit 1; }
 
 # default striping: no lfs setstripe, files land with the MDT default layout
-D="$A/ci_${SLURM_JOB_ID}"
-rm -rf "$D"
-mkdir -p "$D"
+OUT_DIR="$SCRIPT_DIR/ci_${SLURM_JOB_ID}"
+rm -rf "$OUT_DIR"
+mkdir -p "$OUT_DIR"
 
 BACKENDS="mpiio hdf5 adios2"   # general I/O backends only (openPMD/pmd_* too specific)
 REQUIRE="${REQUIRE:-$BACKENDS}"
@@ -65,43 +65,43 @@ LOCAL="${LOCAL:-32}"          # per-rank field matrices (minimal default)
 PARTICLES="${PARTICLES:-50000}"
 STEPS="${STEPS:-1}"           # checkpoints
 
-O="--dir $D --local $LOCAL --particles $PARTICLES --steps $STEPS --interval 1 --verify"
+BENCH_OPTS="--dir $OUT_DIR --local $LOCAL --particles $PARTICLES --steps $STEPS --interval 1 --verify"
 
-echo "pio-bench CI: job=$SLURM_JOB_ID ranks=$SLURM_NTASKS local=$LOCAL particles=$PARTICLES steps=$STEPS required=[$REQUIRE] dir=$D"
-echo "pio-bench CI: scriptdir=$A binary=$B"
+echo "pio-bench CI: job=$SLURM_JOB_ID ranks=$SLURM_NTASKS local=$LOCAL particles=$PARTICLES steps=$STEPS required=[$REQUIRE] outdir=$OUT_DIR"
+echo "pio-bench CI: scriptdir=$SCRIPT_DIR binary=$BENCH_BIN"
 echo
 
 fail=0
-ran=0
-for b in $BACKENDS; do
-    tag=""; for r in $REQUIRE; do [ "$r" = "$b" ] && tag=" [required]"; done
+passed=0
+for backend in $BACKENDS; do
+    tag=""; for req in $REQUIRE; do [ "$req" = "$backend" ] && tag=" [required]"; done
 
-    echo "=== $b$tag ==="
-    srun --export=ALL apptainer exec "$CONT" bash -c "$B --backend $b $O"
+    echo "=== $backend$tag ==="
+    srun --export=ALL apptainer exec "$CONT" bash -c "$BENCH_BIN --backend $backend $BENCH_OPTS"
     rc=$?
 
     if [ "$rc" -eq 2 ]; then
         if [ -n "$tag" ]; then
-            echo "-- $b: SKIPPED (not compiled in) -- but REQUIRED => FAIL"
+            echo "-- $backend: SKIPPED (not compiled in) -- but REQUIRED => FAIL"
             fail=1
         else
-            echo "-- $b: SKIPPED (not compiled into this build)"
+            echo "-- $backend: SKIPPED (not compiled into this build)"
         fi
     elif [ "$rc" -eq 0 ]; then
-        echo "-- $b: PASS"
-        ran=$((ran + 1))
+        echo "-- $backend: PASS"
+        passed=$((passed + 1))
     else
-        echo "-- $b: FAIL (rc=$rc)"
+        echo "-- $backend: FAIL (rc=$rc)"
         fail=1
     fi
     echo
 done
 
-[ "$ran" -eq 0 ] && { echo "CI ERROR: no backend was actually exercised"; fail=1; }
+[ "$passed" -eq 0 ] && { echo "CI ERROR: no backend was actually exercised"; fail=1; }
 
-rm -rf "$D"
+rm -rf "$OUT_DIR"
 if [ "$fail" -eq 0 ]; then
-    echo "CI: OK -- general I/O stack verified ($ran backend(s) passed)"
+    echo "CI: OK -- general I/O stack verified ($passed backend(s) passed)"
 else
     echo "CI: FAILED"
 fi
