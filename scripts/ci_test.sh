@@ -39,7 +39,8 @@
 # SLURM_SUBMIT_DIR is the scripts dir and the repo root is one level up
 A="$SLURM_SUBMIT_DIR"
 export CONT=/lustre/rz/dbertini2/mpiio_evolve/container/plasma_pp.sif
-export APPTAINER_BINDPATH=/lustre/rz/dbertini2:/lustre/rz/dbertini
+# comma-separated (colon inside a spec means src:dest, not a path separator)
+export APPTAINER_BINDPATH=/lustre/rz/dbertini2,/lustre/rz/dbertini
 export APPTAINER_SHARENS=true
 export APPTAINER_CONFIGDIR=/tmp/$USER
 export OMPI_MCA_io=romio341
