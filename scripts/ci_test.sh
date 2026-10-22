@@ -31,7 +31,10 @@
 #   cd scripts && sbatch ci_test.sh
 # CONT / BINDPATH are set explicitly below; edit them if the image lives
 # elsewhere. REQUIRE="mpiio hdf5 adios2" may be overridden via env to relax
-# the gate. (add --partition=... to the SBATCH header if your cluster needs it)
+# the gate.
+# Scale the run with sbatch options (they override the #SBATCH defaults
+# above), e.g. the submit_all.sh shape:
+#   sbatch --nodes=4 --ntasks-per-node=32 --partition=long ci_test.sh
 # =============================================
 # PIO CI
 # =============================================
@@ -60,7 +63,7 @@ O="--dir $D --local 32 --particles 50000 --steps 1 --interval 1 --verify"
 BACKENDS="mpiio hdf5 adios2"   # general I/O backends only (openPMD/pmd_* too specific)
 REQUIRE="${REQUIRE:-$BACKENDS}"
 
-echo "pio-bench CI: job=$SLURM_JOB_ID ranks=4 required=[$REQUIRE] dir=$D"
+echo "pio-bench CI: job=$SLURM_JOB_ID ranks=$SLURM_NTASKS required=[$REQUIRE] dir=$D"
 echo "pio-bench CI: scriptdir=$A binary=$B"
 echo
 

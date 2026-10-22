@@ -68,6 +68,9 @@ fails, or is silently compiled out, pinpoints a broken or missing dependency.
 cd scripts && sbatch ci_test.sh    # 1 node, 4 ranks: mpiio, hdf5 (parallel), adios2, --verify
 ```
 
+The defaults in the script header can be overridden with sbatch options,
+e.g. `sbatch --nodes=4 --ntasks-per-node=32 --partition=long ci_test.sh`.
+
 `ci_test.sh` runs the three major HPC I/O backends — `mpiio`, `hdf5`
 (parallel) and `adios2` — at a minimal size, to test the proper installation
 of the backends and their MPI dependencies. It can be used to quickly validate
