@@ -6,8 +6,8 @@
 #SBATCH --time=00:20:00
 #SBATCH --output=pio-bench-ci_%j.out
 #SBATCH --error=pio-bench-ci_%j.err
-# ci_test.sh -- CI gate for the GENERAL parallel I/O stack, as ONE small
-# sbatch job (the CI twin of submit_all.sh):
+# ci_test.sh -- CI test for the GENERAL parallel I/O stack
+# default run:
 #   one node, 4 ranks, the three major HPC I/O backends -- mpiio,
 #   hdf5 (parallel) and adios2 -- at a minimal size, default file
 #   placement (no lfs setstripe), each leg verified by read-back.
@@ -30,13 +30,10 @@
 # site runs the script from a spool copy):
 #   cd scripts && sbatch ci_test.sh
 # CONT / BINDPATH are set explicitly below; edit them if the image lives
-# elsewhere.
-# Test size (per rank) defaults to minimal; scale it via env (inherited by
-# the batch job from the submit shell), e.g.:
-#   LOCAL=256 PARTICLES=4000000 STEPS=3
-# REQUIRE="mpiio hdf5 adios2" may be overridden via env to relax the gate.
-# Scale the allocation with sbatch options (they override the #SBATCH
-# defaults above), e.g. the submit_all.sh shape:
+# elsewhere. REQUIRE="mpiio hdf5 adios2" may be overridden via env to relax
+# the gate.
+# Scale the run with sbatch options (they override the #SBATCH defaults
+# above), e.g. the submit_all.sh shape:
 #   sbatch --nodes=4 --ntasks-per-node=32 --partition=long ci_test.sh
 # =============================================
 # PIO CI
