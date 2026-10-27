@@ -139,6 +139,12 @@ struct BenchConfig {
     std::optional<std::string> adi_bb_path{};  // adios2: bbview BurstBufferPath
                                                 // (node-local dir; default = the
                                                 // engine's system tmpdir)
+    std::string adi_bb_close{"durable"};  // adios2: bbview CloseMode -- "staged":
+                                          // Close() returns at the node-local dump,
+                                          // drain + metadata commit run in the
+                                          // background (durability at a clean
+                                          // exit; the read/verify path waits for
+                                          // the engine's bbview.final marker)
     bool pmd_split{false};                     // pmd_*: two incremental flushes ->
                                                // phase split; default off = the
                                                // canonical single flush at
@@ -187,6 +193,11 @@ struct BenchConfig {
         "                         read/verify path always uses stock BP5)\n"
         "  --bb DIR               adios2: burst-buffer dir for bbview\n"
         "                         (BurstBufferPath; default: system tmpdir)\n"
+        "  --bb-close MODE        adios2: bbview close mode (durable: Close()\n"
+        "                         waits for the drain, default | staged: Close()\n"
+        "                         returns at the node-local dump, drain + commit\n"
+        "                         run in the background, durability at a clean\n"
+        "                         exit; verify waits for the bbview.final marker)\n"
         "  --pmd-split            pmd_*: two incremental flushes to split\n"
         "                         field/particle seconds (default off = the\n"
         "                         canonical single flush at iteration.close(),\n"
@@ -276,6 +287,11 @@ struct BenchConfig {
                 cfg.adi_engine = std::string(need_value(i, key));
             } else if (key == "bb") {
                 cfg.adi_bb_path = std::string(need_value(i, key));
+            } else if (key == "bb-close") {
+                std::string v(need_value(i, key));
+                if (v != "staged" && v != "durable")
+                    throw ParseError("--bb-close must be 'staged' or 'durable'");
+                cfg.adi_bb_close = std::move(v);
             } else if (key == "pmd-split") {
                 cfg.pmd_split = true;
             } else if (key == "pmd-auto-chunks") {
@@ -321,6 +337,8 @@ struct BenchConfig {
             throw ParseError("--aggregators must be >= 0");
         if (cfg.adi_bb_path && cfg.adi_engine != "bbview")
             throw ParseError("--bb only applies with --adios2-engine=bbview");
+        if (cfg.adi_bb_close != "durable" && cfg.adi_engine != "bbview")
+            throw ParseError("--bb-close only applies with --adios2-engine=bbview");
         return cfg;
     }
 
@@ -344,7 +362,8 @@ struct BenchConfig {
         if (backend == BackendKind::Adios2)
             os << " adi_stats=" << (adi_stats ? "on" : "off")
                << " adi_engine=" << adi_engine
-               << " bb=" << (adi_bb_path ? *adi_bb_path : "tmpdir");
+               << " bb=" << (adi_bb_path ? *adi_bb_path : "tmpdir")
+               << " bb_close=" << adi_bb_close;
         if (backend == BackendKind::PmdHdf5 || backend == BackendKind::PmdAdios2)
             os << " pmd_split=" << (pmd_split ? "on" : "off")
                << " pmd_chunks=" << (pmd_rank_chunks ? "rank" : "auto");

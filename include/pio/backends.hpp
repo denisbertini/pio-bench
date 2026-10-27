@@ -37,6 +37,10 @@ struct IoSettings {
                                    // bbview = node-local burst-buffer writer)
     std::optional<std::string> adi_bb_path{}; // adios2: bbview BurstBufferPath
                                                // (cf. --bb; default: system tmpdir)
+    std::string adi_bb_close{"durable"};  // adios2: bbview CloseMode (cf.
+                                          // --bb-close; "staged" = Close()
+                                          // returns at the node-local dump,
+                                          // drain + commit run in the background)
     bool pmd_split{false};  // pmd_*: two incremental flushes -> real phase split
                             // (default: canonical single flush at
                             // iteration.close(), cf. --pmd-split)
@@ -51,7 +55,8 @@ struct IoSettings {
     static IoSettings from(const BenchConfig& c) {
         return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
                           c.h5_prepack, c.adi_stats, c.adi_engine, c.adi_bb_path,
-                          c.pmd_split, c.pmd_rank_chunks, c.h5_rank_chunks};
+                          c.adi_bb_close, c.pmd_split, c.pmd_rank_chunks,
+                          c.h5_rank_chunks};
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.

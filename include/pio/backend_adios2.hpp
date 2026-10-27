@@ -17,8 +17,11 @@
 // Close (the flush) -> particle_seconds. Approximate but consistent.
 #pragma once
 
+#include <chrono>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "pio/backends.hpp"
@@ -59,6 +62,12 @@ public:
         io.SetEngine(settings_.adi_engine);
         if (settings_.adi_bb_path)
             io.SetParameter("BurstBufferPath", *settings_.adi_bb_path);
+        // bbview staged close: Close() returns when the last step hits the
+        // node-local burst buffer; drain + metadata commit finish in the
+        // background (bbview.final marker = durable). Durable (default)
+        // needs no parameter -- it is the engine's native behavior.
+        if (settings_.adi_bb_close != "durable")
+            io.SetParameter("CloseMode", settings_.adi_bb_close);
         // BP5 per-block statistics (StatsLevel: 2=full default, 1=min/max,
         // 0=none): level 2 computes min/max/sum over EVERY written block --
         // an extra full pass over the payload on the writer CPU. --no-adi-stats
@@ -170,6 +179,7 @@ public:
 
     void read_field(const std::filesystem::path& path, const Domain& d,
                     Field3d<double>& dst) const {
+        wait_for_durable(path);
         adios2::ADIOS adios;
         adios2::IO io = adios.DeclareIO("pio_bench_read");
         io.SetEngine("BP5");
@@ -208,6 +218,7 @@ public:
     /// the AoS (same selection style as the field read).
     void read_particles(const std::filesystem::path& path, const Domain&,
                         const ParticleSet& src, std::vector<Particle>& out) const {
+        wait_for_durable(path);
         const std::size_t n = src.local_count();
         out.assign(n, Particle{});
         if (n == 0)
@@ -255,6 +266,28 @@ public:
     }
 
 private:
+    /// Staged close: the checkpoint is only readable once the background
+    /// finalizer has committed the metadata and published the durability
+    /// marker (the verify phase runs while the last drains are still in
+    /// flight). A missing marker at timeout means the writer crashed
+    /// between Close() and finalization: the checkpoint is invalid.
+    void wait_for_durable(const std::filesystem::path& path) const {
+        if (settings_.adi_bb_close == "durable")
+            return;
+        const auto marker = path / "bbview.final";
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(300);
+        while (!std::filesystem::exists(marker)) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                throw std::runtime_error(
+                    "adios2(bbview staged): " + path.string() +
+                    " not durable after 300 s (bbview.final missing) -- the "
+                    "writer likely crashed between Close() and the "
+                    "background finalization");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
     MPI_Comm comm_;
     IoSettings settings_;
 };
