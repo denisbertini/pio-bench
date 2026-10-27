@@ -132,6 +132,13 @@ struct BenchConfig {
                                                // old H5P_DEFAULT (contiguous)
                                                // layout, for A/B
     bool adi_stats{true};                      // adios2: BP5 per-block statistics
+    std::string adi_engine{"BP5"};             // adios2: write engine (bbview =
+                                                // node-local burst-buffer writer,
+                                                // data drains to the target FS
+                                                // asynchronously)
+    std::optional<std::string> adi_bb_path{};  // adios2: bbview BurstBufferPath
+                                                // (node-local dir; default = the
+                                                // engine's system tmpdir)
     bool pmd_split{false};                     // pmd_*: two incremental flushes ->
                                                // phase split; default off = the
                                                // canonical single flush at
@@ -174,6 +181,12 @@ struct BenchConfig {
         "                         pattern, cf. --pmd-auto-chunks)\n"
         "  --no-adi-stats         adios2: BP5 StatsLevel=0 (skip per-block\n"
         "                         min/max/sum statistics of every written block)\n"
+        "  --adios2-engine NAME   adios2: write engine (bbview = node-local\n"
+        "                         burst-buffer writer; data reaches the target\n"
+        "                         filesystem via asynchronous drain; the\n"
+        "                         read/verify path always uses stock BP5)\n"
+        "  --bb DIR               adios2: burst-buffer dir for bbview\n"
+        "                         (BurstBufferPath; default: system tmpdir)\n"
         "  --pmd-split            pmd_*: two incremental flushes to split\n"
         "                         field/particle seconds (default off = the\n"
         "                         canonical single flush at iteration.close(),\n"
@@ -259,6 +272,10 @@ struct BenchConfig {
                 cfg.h5_rank_chunks = false;
             } else if (key == "no-adi-stats") {
                 cfg.adi_stats = false;
+            } else if (key == "adios2-engine") {
+                cfg.adi_engine = std::string(need_value(i, key));
+            } else if (key == "bb") {
+                cfg.adi_bb_path = std::string(need_value(i, key));
             } else if (key == "pmd-split") {
                 cfg.pmd_split = true;
             } else if (key == "pmd-auto-chunks") {
@@ -302,6 +319,8 @@ struct BenchConfig {
             throw ParseError("--sample-rate must be > 0");
         if (cfg.aggregators && *cfg.aggregators < 0)
             throw ParseError("--aggregators must be >= 0");
+        if (cfg.adi_bb_path && cfg.adi_engine != "bbview")
+            throw ParseError("--bb only applies with --adios2-engine=bbview");
         return cfg;
     }
 
@@ -323,7 +342,9 @@ struct BenchConfig {
             os << " h5_write=" << (h5_prepack ? "prepack" : "strided")
                << " h5_chunks=" << (h5_rank_chunks ? "rank" : "auto");
         if (backend == BackendKind::Adios2)
-            os << " adi_stats=" << (adi_stats ? "on" : "off");
+            os << " adi_stats=" << (adi_stats ? "on" : "off")
+               << " adi_engine=" << adi_engine
+               << " bb=" << (adi_bb_path ? *adi_bb_path : "tmpdir");
         if (backend == BackendKind::PmdHdf5 || backend == BackendKind::PmdAdios2)
             os << " pmd_split=" << (pmd_split ? "on" : "off")
                << " pmd_chunks=" << (pmd_rank_chunks ? "rank" : "auto");

@@ -1,4 +1,5 @@
-// pio/backend_adios2.hpp -- ADIOS2 (BP5 engine) backend.
+// pio/backend_adios2.hpp -- ADIOS2 backend (BP5 engine by default; the
+// write engine is selectable via --adios2-engine, e.g. bbview).
 //
 // One .bp dataset per checkpoint:
 //   "fields/data"     3-D double, per-rank global block (ConstantDims)
@@ -49,7 +50,15 @@ public:
         // ADIOS 2.6+ and 3.x.
         adios2::ADIOS adios;
         adios2::IO io = adios.DeclareIO("pio_bench");
-        io.SetEngine("BP5");
+        // Write engine: stock BP5 (default) or bbview (node-local burst
+        // buffer: each step is written to the local SSD and drained to the
+        // target filesystem asynchronously by a per-node committer). The
+        // on-disk format is stock BP5 either way, so the read/verify paths
+        // below always use the stock BP5 reader -- which doubles as
+        // validation of bbview output.
+        io.SetEngine(settings_.adi_engine);
+        if (settings_.adi_bb_path)
+            io.SetParameter("BurstBufferPath", *settings_.adi_bb_path);
         // BP5 per-block statistics (StatsLevel: 2=full default, 1=min/max,
         // 0=none): level 2 computes min/max/sum over EVERY written block --
         // an extra full pass over the payload on the writer CPU. --no-adi-stats
