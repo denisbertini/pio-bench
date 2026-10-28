@@ -68,6 +68,13 @@ public:
         // needs no parameter -- it is the engine's native behavior.
         if (settings_.adi_bb_close != "durable")
             io.SetParameter("CloseMode", settings_.adi_bb_close);
+        // bbview per-rank cap on staged-undrained bytes (MiB); EndStep blocks
+        // above it so the node-local burst buffer cannot fill. The engine
+        // default (1024) suits small tmpfs; raise it to match real burst
+        // buffers (or 0 = unlimited) so backpressure never distorts a run.
+        if (settings_.adi_bb_watermark)
+            io.SetParameter("StagingWatermarkMB",
+                            std::to_string(*settings_.adi_bb_watermark));
         // BP5 per-block statistics (StatsLevel: 2=full default, 1=min/max,
         // 0=none): level 2 computes min/max/sum over EVERY written block --
         // an extra full pass over the payload on the writer CPU. --no-adi-stats

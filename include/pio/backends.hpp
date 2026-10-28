@@ -41,6 +41,11 @@ struct IoSettings {
                                           // --bb-close; "staged" = Close()
                                           // returns at the node-local dump,
                                           // drain + commit run in the background)
+    std::optional<std::size_t> adi_bb_watermark{}; // adios2: bbview
+                                                   // StagingWatermarkMB (cf.
+                                                   // --bb-watermark; MiB/rank
+                                                   // staged-undrained cap, 0 =
+                                                   // unlimited, default 1024)
     bool pmd_split{false};  // pmd_*: two incremental flushes -> real phase split
                             // (default: canonical single flush at
                             // iteration.close(), cf. --pmd-split)
@@ -55,8 +60,8 @@ struct IoSettings {
     static IoSettings from(const BenchConfig& c) {
         return IoSettings{c.aggregators, c.buffer_bytes, c.collective_buffering,
                           c.h5_prepack, c.adi_stats, c.adi_engine, c.adi_bb_path,
-                          c.adi_bb_close, c.pmd_split, c.pmd_rank_chunks,
-                          c.h5_rank_chunks};
+                          c.adi_bb_close, c.adi_bb_watermark, c.pmd_split,
+                          c.pmd_rank_chunks, c.h5_rank_chunks};
     }
 
     /// ROMIO hint set shared by the mpiio and hdf5 (H5Pset_fapl_mpio) paths.

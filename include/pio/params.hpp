@@ -145,6 +145,11 @@ struct BenchConfig {
                                           // background (durability at a clean
                                           // exit; the read/verify path waits for
                                           // the engine's bbview.final marker)
+    std::optional<std::size_t> adi_bb_watermark{}; // adios2: bbview
+                                                 // StagingWatermarkMB (MiB/rank
+                                                 // staged-undrained cap before
+                                                 // EndStep backpressure; 0 =
+                                                 // unlimited; default = engine's 1024)
     bool pmd_split{false};                     // pmd_*: two incremental flushes ->
                                                // phase split; default off = the
                                                // canonical single flush at
@@ -198,6 +203,10 @@ struct BenchConfig {
         "                         returns at the node-local dump, drain + commit\n"
         "                         run in the background, durability at a clean\n"
         "                         exit; verify waits for the bbview.final marker)\n"
+        "  --bb-watermark MB      adios2: bbview per-rank staging watermark in MiB\n"
+        "                         (StagingWatermarkMB; cap on staged-undrained\n"
+        "                         bytes before EndStep backpressure; 0 = unlimited;\n"
+        "                         default = engine's 1024)\n"
         "  --pmd-split            pmd_*: two incremental flushes to split\n"
         "                         field/particle seconds (default off = the\n"
         "                         canonical single flush at iteration.close(),\n"
@@ -292,6 +301,11 @@ struct BenchConfig {
                 if (v != "staged" && v != "durable")
                     throw ParseError("--bb-close must be 'staged' or 'durable'");
                 cfg.adi_bb_close = std::move(v);
+            } else if (key == "bb-watermark") {
+                const long long wm = detail::parse_ll(need_value(i, key), key);
+                if (wm < 0)
+                    throw ParseError("--bb-watermark must be >= 0 (0 = unlimited)");
+                cfg.adi_bb_watermark = static_cast<std::size_t>(wm);
             } else if (key == "pmd-split") {
                 cfg.pmd_split = true;
             } else if (key == "pmd-auto-chunks") {
@@ -339,6 +353,8 @@ struct BenchConfig {
             throw ParseError("--bb only applies with --adios2-engine=bbview");
         if (cfg.adi_bb_close != "durable" && cfg.adi_engine != "bbview")
             throw ParseError("--bb-close only applies with --adios2-engine=bbview");
+        if (cfg.adi_bb_watermark && cfg.adi_engine != "bbview")
+            throw ParseError("--bb-watermark only applies with --adios2-engine=bbview");
         return cfg;
     }
 
@@ -363,7 +379,9 @@ struct BenchConfig {
             os << " adi_stats=" << (adi_stats ? "on" : "off")
                << " adi_engine=" << adi_engine
                << " bb=" << (adi_bb_path ? *adi_bb_path : "tmpdir")
-               << " bb_close=" << adi_bb_close;
+               << " bb_close=" << adi_bb_close
+               << " bb_watermark="
+               << (adi_bb_watermark ? std::to_string(*adi_bb_watermark) + "MiB" : "default");
         if (backend == BackendKind::PmdHdf5 || backend == BackendKind::PmdAdios2)
             os << " pmd_split=" << (pmd_split ? "on" : "off")
                << " pmd_chunks=" << (pmd_rank_chunks ? "rank" : "auto");
