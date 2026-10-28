@@ -34,14 +34,14 @@ struct IoSettings {
     bool h5_prepack{true};  // hdf5: gather members before H5Dwrite (cf. --h5-strided)
     bool adi_stats{true};   // adios2: BP5 per-block stats (cf. --no-adi-stats)
     std::string adi_engine{"BP5"}; // adios2: write engine (cf. --adios2-engine;
-                                   // bbview = node-local burst-buffer writer)
-    std::optional<std::string> adi_bb_path{}; // adios2: bbview BurstBufferPath
+                                   // bbstage = node-local burst-buffer writer)
+    std::optional<std::string> adi_bb_path{}; // adios2: bbstage BurstBufferPath
                                                // (cf. --bb; default: system tmpdir)
-    std::string adi_bb_close{"durable"};  // adios2: bbview CloseMode (cf.
+    std::string adi_bb_close{"durable"};  // adios2: bbstage CloseMode (cf.
                                           // --bb-close; "staged" = Close()
                                           // returns at the node-local dump,
                                           // drain + commit run in the background)
-    std::optional<std::size_t> adi_bb_watermark{}; // adios2: bbview
+    std::optional<std::size_t> adi_bb_watermark{}; // adios2: bbstage
                                                    // StagingWatermarkMB (cf.
                                                    // --bb-watermark; MiB/rank
                                                    // staged-undrained cap, 0 =

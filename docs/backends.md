@@ -9,7 +9,7 @@ implementation choices and tuning knobs, see [internals.md](internals.md).
 |--------------|----------------------|-------------|-------|
 | `mpiio`      | MPI-IO (ROMIO hints) | raw binary  | Lowest-level reference; particles via a derived record type, field via one subarray view |
 | `hdf5`       | Parallel HDF5        | HDF5        | Rank-aligned chunked datasets |
-| `adios2`     | ADIOS2 BP5           | BP4/BP5     | Requires `-DPIO_WITH_ADIOS2=ON`; write engine selectable via `--adios2-engine` (e.g. `bbview`) |
+| `adios2`     | ADIOS2 BP5           | BP4/BP5     | Requires `-DPIO_WITH_ADIOS2=ON`; write engine selectable via `--adios2-engine` (e.g. `bbstage`) |
 | `pmd_hdf5`   | openPMD-api → HDF5   | HDF5        | openPMD-compliant layout |
 | `pmd_adios2` | openPMD-api → ADIOS2 | BP4/BP5     | openPMD-compliant layout; needs both openPMD-api and ADIOS2 |
 

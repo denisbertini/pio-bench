@@ -70,12 +70,12 @@ StatsLevel 0 to isolate that cost; the file then carries no block statistics
 ## ADIOS2 write engine selection
 
 `--adios2-engine NAME` selects the **write** engine (default `BP5`). With
-`--adios2-engine=bbview --bb DIR`, each rank stages its checkpoint data on
+`--adios2-engine=bbstage --bb DIR`, each rank stages its checkpoint data on
 the node-local burst buffer (`DIR`, default system tmpdir) and a per-node
 committer drains it to the output filesystem asynchronously — the app sees
 local-SSD write latency instead of the target filesystem's. The on-disk
 format is stock BP5 either way, so `--verify` always reads back with the
-stock BP5 reader, which also validates the bbview drain end-to-end.
+stock BP5 reader, which also validates the bbstage drain end-to-end.
 
 ## The `pmd_*` write path
 

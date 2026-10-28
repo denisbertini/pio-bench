@@ -132,20 +132,20 @@ struct BenchConfig {
                                                // old H5P_DEFAULT (contiguous)
                                                // layout, for A/B
     bool adi_stats{true};                      // adios2: BP5 per-block statistics
-    std::string adi_engine{"BP5"};             // adios2: write engine (bbview =
+    std::string adi_engine{"BP5"};             // adios2: write engine (bbstage =
                                                 // node-local burst-buffer writer,
                                                 // data drains to the target FS
                                                 // asynchronously)
-    std::optional<std::string> adi_bb_path{};  // adios2: bbview BurstBufferPath
+    std::optional<std::string> adi_bb_path{};  // adios2: bbstage BurstBufferPath
                                                 // (node-local dir; default = the
                                                 // engine's system tmpdir)
-    std::string adi_bb_close{"durable"};  // adios2: bbview CloseMode -- "staged":
+    std::string adi_bb_close{"durable"};  // adios2: bbstage CloseMode -- "staged":
                                           // Close() returns at the node-local dump,
                                           // drain + metadata commit run in the
                                           // background (durability at a clean
                                           // exit; the read/verify path waits for
-                                          // the engine's bbview.final marker)
-    std::optional<std::size_t> adi_bb_watermark{}; // adios2: bbview
+                                          // the engine's bbstage.final marker)
+    std::optional<std::size_t> adi_bb_watermark{}; // adios2: bbstage
                                                  // StagingWatermarkMB (MiB/rank
                                                  // staged-undrained cap before
                                                  // EndStep backpressure; 0 =
@@ -192,18 +192,18 @@ struct BenchConfig {
         "                         pattern, cf. --pmd-auto-chunks)\n"
         "  --no-adi-stats         adios2: BP5 StatsLevel=0 (skip per-block\n"
         "                         min/max/sum statistics of every written block)\n"
-        "  --adios2-engine NAME   adios2: write engine (bbview = node-local\n"
+        "  --adios2-engine NAME   adios2: write engine (bbstage = node-local\n"
         "                         burst-buffer writer; data reaches the target\n"
         "                         filesystem via asynchronous drain; the\n"
         "                         read/verify path always uses stock BP5)\n"
-        "  --bb DIR               adios2: burst-buffer dir for bbview\n"
+        "  --bb DIR               adios2: burst-buffer dir for bbstage\n"
         "                         (BurstBufferPath; default: system tmpdir)\n"
-        "  --bb-close MODE        adios2: bbview close mode (durable: Close()\n"
+        "  --bb-close MODE        adios2: bbstage close mode (durable: Close()\n"
         "                         waits for the drain, default | staged: Close()\n"
         "                         returns at the node-local dump, drain + commit\n"
         "                         run in the background, durability at a clean\n"
-        "                         exit; verify waits for the bbview.final marker)\n"
-        "  --bb-watermark MB      adios2: bbview per-rank staging watermark in MiB\n"
+        "                         exit; verify waits for the bbstage.final marker)\n"
+        "  --bb-watermark MB      adios2: bbstage per-rank staging watermark in MiB\n"
         "                         (StagingWatermarkMB; cap on staged-undrained\n"
         "                         bytes before EndStep backpressure; 0 = unlimited;\n"
         "                         default = engine's 1024)\n"
@@ -349,12 +349,12 @@ struct BenchConfig {
             throw ParseError("--sample-rate must be > 0");
         if (cfg.aggregators && *cfg.aggregators < 0)
             throw ParseError("--aggregators must be >= 0");
-        if (cfg.adi_bb_path && cfg.adi_engine != "bbview")
-            throw ParseError("--bb only applies with --adios2-engine=bbview");
-        if (cfg.adi_bb_close != "durable" && cfg.adi_engine != "bbview")
-            throw ParseError("--bb-close only applies with --adios2-engine=bbview");
-        if (cfg.adi_bb_watermark && cfg.adi_engine != "bbview")
-            throw ParseError("--bb-watermark only applies with --adios2-engine=bbview");
+        if (cfg.adi_bb_path && cfg.adi_engine != "bbstage")
+            throw ParseError("--bb only applies with --adios2-engine=bbstage");
+        if (cfg.adi_bb_close != "durable" && cfg.adi_engine != "bbstage")
+            throw ParseError("--bb-close only applies with --adios2-engine=bbstage");
+        if (cfg.adi_bb_watermark && cfg.adi_engine != "bbstage")
+            throw ParseError("--bb-watermark only applies with --adios2-engine=bbstage");
         return cfg;
     }
 

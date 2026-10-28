@@ -1,5 +1,5 @@
 // pio/backend_adios2.hpp -- ADIOS2 backend (BP5 engine by default; the
-// write engine is selectable via --adios2-engine, e.g. bbview).
+// write engine is selectable via --adios2-engine, e.g. bbstage).
 //
 // One .bp dataset per checkpoint:
 //   "fields/data"     3-D double, per-rank global block (ConstantDims)
@@ -53,22 +53,22 @@ public:
         // ADIOS 2.6+ and 3.x.
         adios2::ADIOS adios;
         adios2::IO io = adios.DeclareIO("pio_bench");
-        // Write engine: stock BP5 (default) or bbview (node-local burst
+        // Write engine: stock BP5 (default) or bbstage (node-local burst
         // buffer: each step is written to the local SSD and drained to the
         // target filesystem asynchronously by a per-node committer). The
         // on-disk format is stock BP5 either way, so the read/verify paths
         // below always use the stock BP5 reader -- which doubles as
-        // validation of bbview output.
+        // validation of bbstage output.
         io.SetEngine(settings_.adi_engine);
         if (settings_.adi_bb_path)
             io.SetParameter("BurstBufferPath", *settings_.adi_bb_path);
-        // bbview staged close: Close() returns when the last step hits the
+        // bbstage staged close: Close() returns when the last step hits the
         // node-local burst buffer; drain + metadata commit finish in the
-        // background (bbview.final marker = durable). Durable (default)
+        // background (bbstage.final marker = durable). Durable (default)
         // needs no parameter -- it is the engine's native behavior.
         if (settings_.adi_bb_close != "durable")
             io.SetParameter("CloseMode", settings_.adi_bb_close);
-        // bbview per-rank cap on staged-undrained bytes (MiB); EndStep blocks
+        // bbstage per-rank cap on staged-undrained bytes (MiB); EndStep blocks
         // above it so the node-local burst buffer cannot fill. The engine
         // default (1024) suits small tmpfs; raise it to match real burst
         // buffers (or 0 = unlimited) so backpressure never distorts a run.
@@ -281,14 +281,14 @@ private:
     void wait_for_durable(const std::filesystem::path& path) const {
         if (settings_.adi_bb_close == "durable")
             return;
-        const auto marker = path / "bbview.final";
+        const auto marker = path / "bbstage.final";
         const auto deadline = std::chrono::steady_clock::now() +
                               std::chrono::seconds(300);
         while (!std::filesystem::exists(marker)) {
             if (std::chrono::steady_clock::now() >= deadline)
                 throw std::runtime_error(
-                    "adios2(bbview staged): " + path.string() +
-                    " not durable after 300 s (bbview.final missing) -- the "
+                    "adios2(bbstage staged): " + path.string() +
+                    " not durable after 300 s (bbstage.final missing) -- the "
                     "writer likely crashed between Close() and the "
                     "background finalization");
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
